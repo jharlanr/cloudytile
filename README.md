@@ -16,7 +16,7 @@ The end use of these classifications is as a soft input to a more complicated cl
   <tr>
     <th align="right">useful</th>
     <td><img src="assets/eg_useful1.png" alt="useful 1" width="240"/></td>
-    <td><img src="assets/eg_useful2.png" alt="useful 2" width="240"/></td>
+    <td><img src="assets/eg_useful3.png" alt="useful 2" width="240"/></td>
   </tr>
   <tr>
     <th align="right">not useful</th>
