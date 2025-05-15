@@ -6,7 +6,7 @@ NOTE: this repo is under active development...
 
 The end use of these classifications is as a soft input to a more complicated classification problem (e.g., see [YaoGroup/lake-vision](https://github.com/YaoGroup/lake-vision)), which can guide that network to pay more attention to the image tiles that are 'useful'.
 
-## Model training examples
+## Examples
 <img src="assets/training.png" alt="Training Metrics" width="480px" />
 <img src="assets/confmats.png" alt="Confusion Matrices" width="480px" />
 
