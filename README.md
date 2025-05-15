@@ -25,6 +25,8 @@ The end use of these classifications is as a soft input to a more complicated cl
   </tr>
 </table>
 
+Note that even though the second example of a 'useful' tile is notably cloudy, there is still useful information about the presence of a lake (e.g., we can see through the thin cloud layer and determine that the tile has a lake, and its rough extent).  This information is useful in downstream applications, such as lake detection and drainage classification.  If we were to use a strict cloud cut or other methods, we may erroneously ignore the utility of this tile.
+
 
 ## Model Results
 <img src="assets/training.png" alt="Training Metrics" width="480px" />
