@@ -32,3 +32,14 @@ Note that even though the second example of a 'useful' tile is notably cloudy, t
 <img src="assets/training.png" alt="Training Metrics" width="480px" />
 <img src="assets/confmats.png" alt="Confusion Matrices" width="480px" />
 
+## How to Contribute
+
+This package is being actively developed
+[here](https://github.com/jharlanr/cloudytile).
+
+If you would like to add new functionality, we welcome new contributions from
+anyone as pull requests on [our Github repo](https://github.com/jharlanr/cloudytile).
+
+No contribution is too small, and we also welcome requests for new features
+or bug reports. To contribute to `sat-tile-stack` this way, please 
+[open an issue on GitHub](https://github.com/jharlanr/cloudytile/issues).
