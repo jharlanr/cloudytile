@@ -84,5 +84,6 @@ def main():
 
     print(f"\nTotal JPGs created: {len(paths)}")
 
-    if __name__ == "__main__":
-        main()
+
+if __name__ == "__main__":
+    main()
