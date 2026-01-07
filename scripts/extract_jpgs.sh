@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=LSTM_S2L8_aug
-#SBATCH --output=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/%x_%j.out
-#SBATCH --error=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/%x_%j.err
+#SBATCH --job-name=mk_jpgs
+#SBATCH --output=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs/%x_%j.out
+#SBATCH --error=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs/%x_%j.err
 #SBATCH --time=01:00:00
 #SBATCH -p serc
 #SBATCH --nodes=1
