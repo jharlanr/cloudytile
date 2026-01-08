@@ -1,1 +1,33 @@
+# Current
 *.ipynb_checkpoints
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Model weights (large files)
+*.pth
+*.pt
+weights/
+
+# Data (usually too large for git)
+data/
+*.nc
+*.jpg
+*.png
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
