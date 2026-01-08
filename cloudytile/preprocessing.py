@@ -37,7 +37,8 @@ def nc_to_rgb_array(
     # normalize to [0, 1] range and clip (consistent with lake-vision normalization based on Sentinel-2 pixel value range)
     rgb = np.clip(rgb / imagery_scale, 0.0, 1.0)
 
-    # scale to [0, 255] for .jpg
+    # scale to [0, 255] for .jpg (replace NaNs with 0/black)
+    rgb = np.nan_to_num(rgb, nan=0.0)
     rgb = (rgb * 255).astype(np.uint8)
 
     return rgb
@@ -88,7 +89,7 @@ def extract_frames_from_nc(
 
     # load dataset
     ds = xr.open_dataset(nc_path)
-    n_timesteps = ds.dims["time"]
+    n_timesteps = ds.sizes["time"]
     lake_id = ds.attrs.get("lake_id", nc_path.stem)
 
     # determine which timesteps to sample
