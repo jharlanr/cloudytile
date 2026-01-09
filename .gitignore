@@ -31,3 +31,6 @@ venv/
 
 # macOS
 .DS_Store
+
+# Notebooks
+sandbox/
