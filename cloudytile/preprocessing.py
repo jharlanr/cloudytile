@@ -66,6 +66,7 @@ def extract_frames_from_nc(
     imagery_scale: float = 10000.0,
     quality: int = 95,
     seed: int = None,
+    skip_existing: bool = True,
 ) -> list[Path]:
     """
     Extract frames from a single NetCDF timestack and save as JPGs.
@@ -77,10 +78,11 @@ def extract_frames_from_nc(
         imagery_scale: Scale factor for normalization
         quality: JPG quality
         seed: random seed for reproducibility
+        skip_existing: if True, skip files that already exist (default: True)
 
     Returns:
         List of paths to saved JPG files
-    
+
     Output filename format: {lake_id}_t{timestep:03d}.jpg
     """
     nc_path = Path(nc_path)
@@ -102,12 +104,18 @@ def extract_frames_from_nc(
     saved_paths = []
 
     for t in timesteps:
+        filename = f"{lake_id}_t{t:03d}.jpg"
+        output_path = output_dir / filename
+
+        # skip if file already exists
+        if skip_existing and output_path.exists():
+            saved_paths.append(output_path)
+            continue
+
         # extract RGB frame
         rgb = nc_to_rgb_array(ds, t, imagery_scale)
 
         # save as JPG
-        filename = f"{lake_id}_t{t:03d}.jpg"
-        output_path = output_dir / filename
         save_frame_as_jpg(rgb, output_path, quality)
         saved_paths.append(output_path)
 
@@ -123,6 +131,7 @@ def extract_frames_from_directory(
     imagery_scale: float = 10000.0,
     quality: int = 95,
     seed: int = 42,
+    skip_existing: bool = True,
 ) -> list[Path]:
     """
     Extract frames from multiple NetCDF files in a directory.
@@ -135,6 +144,7 @@ def extract_frames_from_directory(
         imagery_scale: Scale factor for normalization
         quality: JPG quality
         seed: Random seed for reproducibility
+        skip_existing: if True, skip files that already exist (default: True)
 
     Returns:
         List of paths to all saved JPG files
@@ -175,6 +185,7 @@ def extract_frames_from_directory(
             imagery_scale=imagery_scale,
             quality=quality,
             seed=seed + i if seed is not None else None,
+            skip_existing=skip_existing,
         )
         all_saved_paths.extend(paths)
 
