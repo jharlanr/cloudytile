@@ -10,16 +10,16 @@ This file provides guidance for Claude Code when working with the cloudy-tile re
 
 ```
 cloudy-tile/
-├── cloudytile/           # Main Python package
+├── cloudytile/           # Main Python package (importable)
 │   ├── model.py          # CloudyTileCNN architecture
 │   ├── inference.py      # Model loading and prediction utilities
 │   ├── preprocessing.py  # NetCDF to JPG extraction for training data
 │   └── getlabels.py      # Labelbox API integration for fetching labels
-├── scripts/              # Runnable scripts
-│   ├── run_training.py
-│   ├── run_inference.py
-│   └── extract_jpgs.py
-├── data/                 # Training images (PNGs organized by dataset)
+├── engine/               # Runnable scripts
+│   ├── preprocessing/
+│   ├── training/
+│   └── inference/
+├── data/                 # Training images
 └── assets/               # Documentation images
 ```
 
