@@ -3,7 +3,12 @@ Export labels from Labelbox and save as .csv for training.
 
 Usage:
     export LABELBOX_API_KEY="your_key"
+
+    # Create new export:
     python export_labelbox.py --output /path/to/labels.csv
+
+    # Reuse existing export task:
+    python export_labelbox.py --task_id <task_id> --output /path/to/labels.csv
 """
 import argparse
 import os
@@ -12,36 +17,51 @@ import pandas as pd
 from pathlib import Path
 
 
-def export_labels(api_key: str, project_id: str) -> pd.DataFrame:
+def export_labels(api_key: str, project_id: str, task_id: str = None) -> pd.DataFrame:
     """
     Fetch labels from Labelbox and return as a DataFrame.
 
     Args:
         api_key: Labelbox API key
         project_id: Labelbox project ID
+        task_id: Optional existing export task ID (skip creating new export)
 
     Returns:
         DataFrame with columns: filename, label
         where label is 1 (useful) or 0 (not useful)
     """
     client = labelbox.Client(api_key=api_key)
-    project = client.get_project(project_id)
 
-    # Create a new export
-    export_task = project.export_v2(params={
-        "data_row_details": True,
-        "project_details": True,
-        "label_details": True,
-    })
-    export_task.wait_till_done()
+    if task_id:
+        # Use existing export task
+        print(f"  Fetching existing export task: {task_id}")
+        export_task = labelbox.ExportTask.get_task(client, task_id)
+    else:
+        # Create a new export
+        project = client.get_project(project_id)
+        print("  Creating export task...")
+        export_task = project.export(params={
+            "data_row_details": True,
+            "project_details": True,
+            "label_details": True,
+        })
+        print(f"  Export task ID: {export_task.uid}")
+        print("  Waiting for export to complete...")
+        export_task.wait_till_done(timeout_seconds=1000)
 
-    if export_task.has_errors():
-        raise RuntimeError(f"Export failed: {export_task.errors}")
+        if export_task.has_errors():
+            raise RuntimeError(f"Export failed: {export_task.errors}")
 
-    results = export_task.result
+    print("  Fetching results...")
+
+    # Use get_buffered_stream() to get the export results
+    stream = export_task.get_buffered_stream()
 
     rows = []
-    for rec in results:
+    for item in stream:
+        # Each item has a .json attribute containing the parsed dict
+        rec = item.json
+
         filename = rec["data_row"]["external_id"]
 
         # Get label from the nested structure
@@ -71,6 +91,12 @@ def main():
         help="Labelbox project ID",
     )
     parser.add_argument(
+        "--task_id",
+        type=str,
+        default=None,
+        help="Existing export task ID (skip creating new export)",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="labels.csv",
@@ -85,7 +111,7 @@ def main():
 
     print(f"Fetching labels from Labelbox project: {args.project_id}")
 
-    df = export_labels(api_key, args.project_id)
+    df = export_labels(api_key, args.project_id, args.task_id)
 
     # Save to CSV
     output_path = Path(args.output)
