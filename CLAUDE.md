@@ -11,6 +11,7 @@ This file provides guidance for Claude Code when working with the cloudy-tile re
 ```
 cloudy-tile/
 ├── cloudytile/           # Main Python package (importable)
+│   ├── __init__.py
 │   ├── model.py          # CloudyTileCNN architecture
 │   ├── data.py           # PyTorch Dataset class for training
 │   ├── inference.py      # Model loading and prediction utilities
@@ -22,6 +23,7 @@ cloudy-tile/
 │   │   └── run_training.py
 │   └── labeling/
 │       └── export_labelbox.py   # Fetch labels from Labelbox API
+├── labels.csv            # Exported labels from Labelbox
 └── assets/               # Documentation images
 ```
 
@@ -37,6 +39,17 @@ cloudy-tile/
 - Training data: JPG/PNG images extracted from NetCDF timestacks
 - Labels: Binary (0 = not useful/cloudy, 1 = useful)
 - Imagery scale: 10000.0 (Sentinel-2 normalization)
+
+### Preprocessing Pipeline
+- `preprocessing.py:extract_frames_from_nc()` - Extract JPGs from a single NetCDF file
+- `preprocessing.py:extract_frames_from_directory()` - Batch extract from multiple NetCDF files
+- Both support `skip_existing=True` to avoid re-extracting existing files
+
+### Labeling Workflow
+- Labels are exported from Labelbox using `export_labelbox.py`
+- Labelbox project ID: `cmk5q6tey0hru07y8024t1lsb`
+- Use `--task_id` to reuse an existing export (faster than creating new)
+- Output: CSV with columns `filename`, `label` (0=not useful, 1=useful)
 
 ### Inference Pipeline
 - `inference.py:predict_from_nc()` - Run predictions on all timesteps in a NetCDF file
