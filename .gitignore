@@ -34,3 +34,6 @@ venv/
 
 # Notebooks
 sandbox/
+
+# Wandb
+wandb/
