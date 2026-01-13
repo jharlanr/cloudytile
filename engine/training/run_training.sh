@@ -26,18 +26,26 @@ ml cudnn/8.9.5.29
 
 # Set paths
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
+SHERLOCK_DIR="/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile"
 LABELS_CSV="$REPO_DIR/labels.csv"
 IMAGE_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/jpg_tiles"
-SAVE_PATH="/oak/stanford/groups/cyaolai/JoshRines/models/cloudytile/best_model.pth"
+SAVE_PATH="$SHERLOCK_DIR/models/best_model.pth"
+WANDB_DIR="$SHERLOCK_DIR/wandb"
 
-# Create model output directory
-mkdir -p "$(dirname $SAVE_PATH)"
+# Create output directories
+mkdir -p "$SHERLOCK_DIR/models"
+mkdir -p "$WANDB_DIR"
 
 # Add repo to PYTHONPATH
 export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 
 # Wandb offline mode (no internet on compute nodes)
+# Store wandb logs in sherlock directory, not repo
 export WANDB_MODE=offline
+export WANDB_DIR="$WANDB_DIR"
+
+# Change to sherlock dir so wandb writes there
+cd $SHERLOCK_DIR
 
 # Run training
 python3 $REPO_DIR/engine/training/run_training.py \
@@ -57,4 +65,4 @@ echo "Training complete!"
 echo "Model saved to: $SAVE_PATH"
 echo ""
 echo "To sync wandb logs, run from login node:"
-echo "  wandb sync $REPO_DIR/engine/training/wandb/offline-run-*"
+echo "  wandb sync $WANDB_DIR/offline-run-*"

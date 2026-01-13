@@ -65,17 +65,24 @@ ml cudnn/8.9.5.29
 
 # Set paths
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
+SHERLOCK_DIR="/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile"
 LABELS_CSV="$REPO_DIR/labels.csv"
 IMAGE_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/jpg_tiles"
+WANDB_DIR="$SHERLOCK_DIR/wandb"
+
+# Create output directories
+mkdir -p "$WANDB_DIR"
 
 # Add repo to PYTHONPATH
 export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 
 # Wandb offline mode (no internet on compute nodes)
+# Store wandb logs in sherlock directory, not repo
 export WANDB_MODE=offline
+export WANDB_DIR="$WANDB_DIR"
 
-# Change to training directory
-cd $REPO_DIR/engine/training
+# Change to sherlock dir so wandb writes there
+cd $SHERLOCK_DIR
 
 # Run the sweep agent
 # --count limits number of runs (remove for unlimited until sweep completes)
@@ -87,7 +94,6 @@ echo "Sweep agent complete!"
 echo "========================================"
 echo ""
 echo "To sync results to wandb.ai, run from LOGIN NODE:"
-echo "  cd $REPO_DIR/engine/training"
-echo "  wandb sync wandb/offline-run-*"
+echo "  wandb sync $WANDB_DIR/offline-run-*"
 echo ""
 echo "View results at: https://wandb.ai/$SWEEP_PATH"
