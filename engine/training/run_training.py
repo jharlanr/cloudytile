@@ -219,16 +219,24 @@ def train(config: dict):
     return best_metric_value, test_metrics
 
 
-def _log_misclassified(model, dataset, device, thumbnail_size: int = 128):
-    """Log misclassified samples to wandb as a table with thumbnails."""
+def _log_misclassified(model, dataset, device, thumbnail_size: int = 128, max_samples: int = 50):
+    """Log misclassified samples to wandb as a table with thumbnails.
+
+    Args:
+        model: Trained model
+        dataset: Dataset to evaluate
+        device: torch device
+        thumbnail_size: Size of thumbnail images
+        max_samples: Maximum number of misclassified samples to log
+    """
     from torchvision.transforms.functional import resize
 
     model.eval()
     columns = ["filename", "thumbnail", "prediction", "label", "probability"]
-    table = wandb.Table(columns=columns)
 
+    # First pass: collect all misclassified samples with their probabilities
+    misclassified = []
     filenames = dataset.filenames
-    misclassified_count = 0
 
     with torch.no_grad():
         for idx in range(len(dataset)):
@@ -239,25 +247,40 @@ def _log_misclassified(model, dataset, device, thumbnail_size: int = 128):
             prob = torch.sigmoid(output).item()
             pred = 1 if prob > 0.5 else 0
 
-            # Only log misclassified samples
             if pred != label:
-                misclassified_count += 1
-                # Create thumbnail (resize tensor then convert to wandb.Image)
-                thumbnail = resize(image, [thumbnail_size, thumbnail_size])
-                # Convert to HWC format for wandb (it expects numpy array or PIL)
-                thumbnail_np = thumbnail.permute(1, 2, 0).numpy()
-                img = wandb.Image(thumbnail_np)
+                # Store confidence (how wrong the model was)
+                confidence = prob if pred == 1 else (1 - prob)
+                misclassified.append((idx, pred, label, prob, confidence))
 
-                table.add_data(
-                    filenames[idx],
-                    img,
-                    pred,
-                    label,
-                    prob,
-                )
+    print(f"  Found {len(misclassified)} misclassified samples")
+
+    if len(misclassified) == 0:
+        return
+
+    # Sort by confidence (most confident mistakes first) and limit
+    misclassified.sort(key=lambda x: x[4], reverse=True)
+    misclassified = misclassified[:max_samples]
+
+    # Second pass: create table with thumbnails for selected samples
+    table = wandb.Table(columns=columns)
+
+    for idx, pred, label, prob, _ in misclassified:
+        image, _ = dataset[idx]
+        # Create thumbnail
+        thumbnail = resize(image, [thumbnail_size, thumbnail_size])
+        thumbnail_np = thumbnail.permute(1, 2, 0).numpy()
+        img = wandb.Image(thumbnail_np)
+
+        table.add_data(
+            filenames[idx],
+            img,
+            pred,
+            label,
+            prob,
+        )
 
     wandb.log({"misclassified_samples": table})
-    print(f"  Logged {misclassified_count} misclassified samples to wandb")
+    print(f"  Logged {len(misclassified)} misclassified samples to wandb (max {max_samples})")
 
 
 def main():
