@@ -1,0 +1,54 @@
+program: run_training.py
+method: bayes
+metric:
+  name: val_precision
+  goal: maximize
+
+parameters:
+  lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 1e-2
+
+  batch_size:
+    values: [16, 32, 64]
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 1e-2
+
+  epochs:
+    value: 30
+
+  img_size:
+    values: [256, 512]
+
+  channels:
+    values:
+      - [16, 32, 64]
+      - [32, 64, 128]
+      - [16, 32, 64, 128]
+
+  fc_layers:
+    values:
+      - [128]
+      - [256]
+      - [128, 64]
+
+  use_scheduler:
+    values: [true, false]
+
+  # Match the sweep metric goal
+  optimize_metric:
+    value: precision
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --labels_csv
+  - ../../labels.csv
+  - --image_dir
+  - /path/to/your/images  # UPDATE THIS PATH
+  - ${args}
