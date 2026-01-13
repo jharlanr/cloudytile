@@ -46,7 +46,7 @@ parameters:
 
 command:
   - ${env}
-  - python
+  - python3
   - ${program}
   - --labels_csv
   - /oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile/labels.csv
