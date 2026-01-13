@@ -231,6 +231,8 @@ def main():
                         help="Conv channel sizes (e.g., '16 32 64' or '[16,32,64]')")
     parser.add_argument("--fc_layers", type=parse_list, default=[128],
                         help="FC layer sizes (e.g., '128' or '[128,64]')")
+    parser.add_argument("--use_scheduler", type=lambda x: x.lower() == 'true',
+                        default=False, help="Use learning rate scheduler")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save_path", type=str, default=None,
