@@ -213,7 +213,51 @@ def train(config: dict):
             wandb.summary["test_f1"] = test_metrics["f1"]
             wandb.summary["test_auc"] = test_metrics["auc"]
 
+            # Log misclassified test samples as thumbnails
+            _log_misclassified(model, test_dataset, device, thumbnail_size=128)
+
     return best_metric_value, test_metrics
+
+
+def _log_misclassified(model, dataset, device, thumbnail_size: int = 128):
+    """Log misclassified samples to wandb as a table with thumbnails."""
+    from torchvision.transforms.functional import resize
+
+    model.eval()
+    columns = ["filename", "thumbnail", "prediction", "label", "probability"]
+    table = wandb.Table(columns=columns)
+
+    filenames = dataset.filenames
+    misclassified_count = 0
+
+    with torch.no_grad():
+        for idx in range(len(dataset)):
+            image, label = dataset[idx]
+            image_batch = image.unsqueeze(0).to(device)
+
+            output = model(image_batch)
+            prob = torch.sigmoid(output).item()
+            pred = 1 if prob > 0.5 else 0
+
+            # Only log misclassified samples
+            if pred != label:
+                misclassified_count += 1
+                # Create thumbnail (resize tensor then convert to wandb.Image)
+                thumbnail = resize(image, [thumbnail_size, thumbnail_size])
+                # Convert to HWC format for wandb (it expects numpy array or PIL)
+                thumbnail_np = thumbnail.permute(1, 2, 0).numpy()
+                img = wandb.Image(thumbnail_np)
+
+                table.add_data(
+                    filenames[idx],
+                    img,
+                    pred,
+                    label,
+                    prob,
+                )
+
+    wandb.log({"misclassified_samples": table})
+    print(f"  Logged {misclassified_count} misclassified samples to wandb")
 
 
 def main():
