@@ -21,8 +21,9 @@ ml python/3.12.1
 ml py-numpy/1.26.3_py312
 ml py-pandas/2.2.1_py312
 ml py-scipy/1.12.0_py312
-ml cuda/12.2.0
-ml cudnn/8.9.5.29
+ml py-pytorch/2.2.1_py312
+ml py-torchvision/0.17.1_py312
+ml py-scikit-learn/1.5.1_py312
 
 # Set paths
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
