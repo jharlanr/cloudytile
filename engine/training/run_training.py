@@ -9,9 +9,25 @@ For wandb sweeps:
     wandb agent <sweep_id>
 """
 import argparse
+import ast
 import sys
 import tempfile
 from pathlib import Path
+
+
+def parse_list(value):
+    """Parse a list from string (handles both '[1,2,3]' and '1 2 3' formats)."""
+    if isinstance(value, list):
+        return value
+    # Try to parse as Python literal (handles [1, 2, 3] format from wandb)
+    try:
+        parsed = ast.literal_eval(value)
+        if isinstance(parsed, list):
+            return parsed
+    except (ValueError, SyntaxError):
+        pass
+    # Fall back to space-separated integers
+    return [int(x) for x in value.split()]
 
 import torch
 import torch.nn as nn
@@ -211,8 +227,10 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--img_size", type=int, default=512)
-    parser.add_argument("--channels", type=int, nargs="+", default=[16, 32, 64])
-    parser.add_argument("--fc_layers", type=int, nargs="+", default=[128])
+    parser.add_argument("--channels", type=parse_list, default=[16, 32, 64],
+                        help="Conv channel sizes (e.g., '16 32 64' or '[16,32,64]')")
+    parser.add_argument("--fc_layers", type=parse_list, default=[128],
+                        help="FC layer sizes (e.g., '128' or '[128,64]')")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save_path", type=str, default=None,
