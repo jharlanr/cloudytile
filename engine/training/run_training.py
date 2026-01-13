@@ -1,0 +1,251 @@
+"""
+Training script for CloudyTileCNN with wandb integration.
+
+Usage:
+    python run_training.py --labels_csv ../../labels.csv --image_dir /path/to/images
+
+For wandb sweeps:
+    wandb sweep sweep.yaml
+    wandb agent <sweep_id>
+"""
+import argparse
+import sys
+import tempfile
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+# Add parent directories to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from cloudytile.data import CloudyTileDataset, create_splits
+from cloudytile.model import CloudyTileCNN
+from cloudytile.training import train_one_epoch, evaluate
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("wandb not installed, logging disabled")
+
+
+VALID_METRICS = ["accuracy", "precision", "recall", "f1", "auc"]
+
+
+def train(config: dict):
+    """Main training function."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Validate optimization metric
+    opt_metric = config.get("optimize_metric", "precision")
+    if opt_metric not in VALID_METRICS:
+        raise ValueError(f"optimize_metric must be one of {VALID_METRICS}, got {opt_metric}")
+
+    print(f"Optimizing for: {opt_metric}")
+
+    # Create data splits
+    train_df, val_df, test_df = create_splits(
+        config["labels_csv"],
+        train_ratio=config.get("train_ratio", 0.8),
+        val_ratio=config.get("val_ratio", 0.1),
+        test_ratio=config.get("test_ratio", 0.1),
+        seed=config.get("seed", 42),
+        output_dir=config.get("splits_dir"),
+    )
+
+    # Save splits temporarily for Dataset to read
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        train_df.to_csv(tmpdir / "train.csv", index=False)
+        val_df.to_csv(tmpdir / "val.csv", index=False)
+
+        # Create datasets
+        img_size = (config.get("img_size", 512), config.get("img_size", 512))
+        train_dataset = CloudyTileDataset(
+            tmpdir / "train.csv",
+            config["image_dir"],
+            img_size=img_size,
+        )
+        val_dataset = CloudyTileDataset(
+            tmpdir / "val.csv",
+            config["image_dir"],
+            img_size=img_size,
+        )
+
+        # Create loaders
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config.get("batch_size", 32),
+            shuffle=True,
+            num_workers=config.get("num_workers", 4),
+            pin_memory=True,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config.get("batch_size", 32),
+            shuffle=False,
+            num_workers=config.get("num_workers", 4),
+            pin_memory=True,
+        )
+
+        # Create model
+        model = CloudyTileCNN(
+            img_size=img_size,
+            channels=config.get("channels", [16, 32, 64]),
+            fc_layers=config.get("fc_layers", [128]),
+        ).to(device)
+
+        # Loss and optimizer
+        criterion = nn.BCEWithLogitsLoss()
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=config.get("lr", 1e-3),
+            weight_decay=config.get("weight_decay", 0.0),
+        )
+
+        # Learning rate scheduler
+        scheduler = None
+        if config.get("use_scheduler", False):
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode="min", factor=0.5, patience=5
+            )
+
+        # Training loop
+        best_metric_value = 0.0
+        epochs = config.get("epochs", 20)
+
+        for epoch in range(epochs):
+            train_loss = train_one_epoch(
+                model, train_loader, optimizer, criterion, device
+            )
+            val_loss, val_metrics = evaluate(model, val_loader, criterion, device)
+
+            if scheduler:
+                scheduler.step(val_loss)
+
+            # Logging
+            log_dict = {
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "val_acc": val_metrics["accuracy"],
+                "val_precision": val_metrics["precision"],
+                "val_recall": val_metrics["recall"],
+                "val_f1": val_metrics["f1"],
+                "val_auc": val_metrics["auc"],
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+
+            print(
+                f"Epoch {epoch+1}/{epochs} | "
+                f"Loss: {train_loss:.4f}/{val_loss:.4f} | "
+                f"Acc: {val_metrics['accuracy']:.3f} | "
+                f"Prec: {val_metrics['precision']:.3f} | "
+                f"F1: {val_metrics['f1']:.3f}"
+            )
+
+            if WANDB_AVAILABLE and wandb.run is not None:
+                wandb.log(log_dict)
+
+            # Save best model based on chosen metric
+            current_metric = val_metrics[opt_metric]
+            if current_metric > best_metric_value:
+                best_metric_value = current_metric
+                if config.get("save_path"):
+                    torch.save(model.state_dict(), config["save_path"])
+                    print(f"  Saved best model ({opt_metric}={current_metric:.4f})")
+
+        # Final test evaluation
+        test_df.to_csv(tmpdir / "test.csv", index=False)
+        test_dataset = CloudyTileDataset(
+            tmpdir / "test.csv",
+            config["image_dir"],
+            img_size=img_size,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=config.get("batch_size", 32),
+            shuffle=False,
+            num_workers=config.get("num_workers", 4),
+        )
+
+        test_loss, test_metrics = evaluate(model, test_loader, criterion, device)
+        print(f"\nTest Results:")
+        print(f"  Loss: {test_loss:.4f}")
+        print(f"  Accuracy:  {test_metrics['accuracy']:.4f}")
+        print(f"  Precision: {test_metrics['precision']:.4f}")
+        print(f"  Recall:    {test_metrics['recall']:.4f}")
+        print(f"  F1:        {test_metrics['f1']:.4f}")
+        print(f"  AUC:       {test_metrics['auc']:.4f}")
+
+        if WANDB_AVAILABLE and wandb.run is not None:
+            wandb.log({
+                "test_loss": test_loss,
+                "test_acc": test_metrics["accuracy"],
+                "test_precision": test_metrics["precision"],
+                "test_recall": test_metrics["recall"],
+                "test_f1": test_metrics["f1"],
+                "test_auc": test_metrics["auc"],
+            })
+            wandb.summary[f"best_val_{opt_metric}"] = best_metric_value
+            wandb.summary["test_acc"] = test_metrics["accuracy"]
+            wandb.summary["test_precision"] = test_metrics["precision"]
+            wandb.summary["test_f1"] = test_metrics["f1"]
+            wandb.summary["test_auc"] = test_metrics["auc"]
+
+    return best_metric_value, test_metrics
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Train CloudyTileCNN")
+    parser.add_argument("--labels_csv", type=str, required=True,
+                        help="Path to labels CSV")
+    parser.add_argument("--image_dir", type=str, required=True,
+                        help="Directory containing images")
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--img_size", type=int, default=512)
+    parser.add_argument("--channels", type=int, nargs="+", default=[16, 32, 64])
+    parser.add_argument("--fc_layers", type=int, nargs="+", default=[128])
+    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--save_path", type=str, default=None,
+                        help="Path to save best model weights")
+    parser.add_argument("--optimize_metric", type=str, default="precision",
+                        choices=VALID_METRICS,
+                        help="Metric to optimize for model selection (default: precision)")
+    parser.add_argument("--wandb_project", type=str, default="cloudy-tile")
+    parser.add_argument("--wandb_name", type=str, default=None)
+    parser.add_argument("--no_wandb", action="store_true",
+                        help="Disable wandb logging")
+    args = parser.parse_args()
+
+    config = vars(args)
+
+    # Initialize wandb
+    if WANDB_AVAILABLE and not args.no_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_name,
+            config=config,
+        )
+        # Allow sweep to override config
+        config = dict(wandb.config)
+        # Ensure required paths are set
+        config["labels_csv"] = args.labels_csv
+        config["image_dir"] = args.image_dir
+
+    train(config)
+
+    if WANDB_AVAILABLE and wandb.run is not None:
+        wandb.finish()
+
+
+if __name__ == "__main__":
+    main()
