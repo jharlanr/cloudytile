@@ -1,3 +1,4 @@
+name: cloudytile-sweep-0
 program: run_training.py
 method: bayes
 metric:
@@ -19,7 +20,7 @@ parameters:
     max: 1e-2
 
   epochs:
-    value: 30
+    value: 200
 
   img_size:
     values: [256, 512]
@@ -50,5 +51,5 @@ command:
   - --labels_csv
   - ../../labels.csv
   - --image_dir
-  - /path/to/your/images  # UPDATE THIS PATH
+  - /oak/stanford/groups/cyaolai/JoshRines/data/jpg_tiles
   - ${args}
