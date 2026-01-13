@@ -75,75 +75,76 @@ class CloudyTileDataset(Dataset):
     def filenames(self) -> list[str]:
         """Return list of all filenames in the dataset."""
         return self.labels_df["filename"].tolist()
-    
-    def create_splits(
-        labels_csv: Union[str, Path],
-        train_ratio: float = 0.8,
-        val_ratio: float = 0.1,
-        test_ratio: float = 0.1,
-        seed: int = 42,
-        output_dir: Union[str, Path] = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Split labels CSV into stratified train/val/test sets.
 
-        Args:
-            labels_csv: Path to the full labels CSV
-            train_ratio: Fraction for training (default: 0.8)
-            val_ratio: Fraction for validation (default: 0.1)
-            test_ratio: Fraction for testing (default: 0.1)
-            seed: Random seed for reproducibility
-            output_dir: If provided, save split CSVs to this directory
 
-        Returns:
-            Tuple of (train_df, val_df, test_df)
-        """
-        from sklearn.model_selection import train_test_split
+def create_splits(
+    labels_csv: Union[str, Path],
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.1,
+    seed: int = 42,
+    output_dir: Union[str, Path] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Split labels CSV into stratified train/val/test sets.
 
-        assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, \
-            "Ratios must sum to 1.0"
+    Args:
+        labels_csv: Path to the full labels CSV
+        train_ratio: Fraction for training (default: 0.8)
+        val_ratio: Fraction for validation (default: 0.1)
+        test_ratio: Fraction for testing (default: 0.1)
+        seed: Random seed for reproducibility
+        output_dir: If provided, save split CSVs to this directory
 
-        df = pd.read_csv(labels_csv)
+    Returns:
+        Tuple of (train_df, val_df, test_df)
+    """
+    from sklearn.model_selection import train_test_split
 
-        # First split: train vs (val + test)
-        train_df, temp_df = train_test_split(
-            df,
-            train_size=train_ratio,
-            stratify=df["label"],
-            random_state=seed,
-        )
+    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, \
+        "Ratios must sum to 1.0"
 
-        # Second split: val vs test (from the temp set)
-        val_ratio_adjusted = val_ratio / (val_ratio + test_ratio)
-        val_df, test_df = train_test_split(
-            temp_df,
-            train_size=val_ratio_adjusted,
-            stratify=temp_df["label"],
-            random_state=seed,
-        )
+    df = pd.read_csv(labels_csv)
 
-        # Reset indices
-        train_df = train_df.reset_index(drop=True)
-        val_df = val_df.reset_index(drop=True)
-        test_df = test_df.reset_index(drop=True)
+    # First split: train vs (val + test)
+    train_df, temp_df = train_test_split(
+        df,
+        train_size=train_ratio,
+        stratify=df["label"],
+        random_state=seed,
+    )
 
-        n = len(df)
-        print(f"Split {n} samples (stratified by label):")
-        print(f"  Train: {len(train_df)} ({len(train_df)/n*100:.1f}%) - "
-            f"class 1: {(train_df['label']==1).mean()*100:.1f}%")
-        print(f"  Val:   {len(val_df)} ({len(val_df)/n*100:.1f}%) - "
-            f"class 1: {(val_df['label']==1).mean()*100:.1f}%")
-        print(f"  Test:  {len(test_df)} ({len(test_df)/n*100:.1f}%) - "
-            f"class 1: {(test_df['label']==1).mean()*100:.1f}%")
+    # Second split: val vs test (from the temp set)
+    val_ratio_adjusted = val_ratio / (val_ratio + test_ratio)
+    val_df, test_df = train_test_split(
+        temp_df,
+        train_size=val_ratio_adjusted,
+        stratify=temp_df["label"],
+        random_state=seed,
+    )
 
-        # Save splits if output_dir provided
-        if output_dir is not None:
-            output_dir = Path(output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
+    # Reset indices
+    train_df = train_df.reset_index(drop=True)
+    val_df = val_df.reset_index(drop=True)
+    test_df = test_df.reset_index(drop=True)
 
-            train_df.to_csv(output_dir / "train.csv", index=False)
-            val_df.to_csv(output_dir / "val.csv", index=False)
-            test_df.to_csv(output_dir / "test.csv", index=False)
-            print(f"  Saved to {output_dir}/")
+    n = len(df)
+    print(f"Split {n} samples (stratified by label):")
+    print(f"  Train: {len(train_df)} ({len(train_df)/n*100:.1f}%) - "
+          f"class 1: {(train_df['label']==1).mean()*100:.1f}%")
+    print(f"  Val:   {len(val_df)} ({len(val_df)/n*100:.1f}%) - "
+          f"class 1: {(val_df['label']==1).mean()*100:.1f}%")
+    print(f"  Test:  {len(test_df)} ({len(test_df)/n*100:.1f}%) - "
+          f"class 1: {(test_df['label']==1).mean()*100:.1f}%")
 
-        return train_df, val_df, test_df
+    # Save splits if output_dir provided
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        train_df.to_csv(output_dir / "train.csv", index=False)
+        val_df.to_csv(output_dir / "val.csv", index=False)
+        test_df.to_csv(output_dir / "test.csv", index=False)
+        print(f"  Saved to {output_dir}/")
+
+    return train_df, val_df, test_df
