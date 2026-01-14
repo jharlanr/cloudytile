@@ -321,6 +321,17 @@ def main():
     train(config)
 
     if WANDB_AVAILABLE and wandb.run is not None:
+        # Print run directory for easy syncing (shows in .out file)
+        # wandb.run.dir ends in /files, but sync needs the parent directory
+        run_dir = Path(wandb.run.dir).parent
+        print(f"\n{'='*60}")
+        print(f"WANDB RUN COMPLETE")
+        print(f"{'='*60}")
+        print(f"Run ID: {wandb.run.id}")
+        print(f"Run directory: {run_dir}")
+        print(f"\nTo sync this run to wandb.ai, use:")
+        print(f"  wandb sync {run_dir}")
+        print(f"{'='*60}\n")
         wandb.finish()
 
 
