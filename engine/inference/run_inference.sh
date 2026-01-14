@@ -59,7 +59,7 @@ export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 # MODEL ARCHITECTURE - MUST MATCH TRAINING
 # ============================================================================
 # Update these if you trained with different architecture:
-CHANNELS="32 64 128"
+CHANNELS="16 32 64"
 FC_LAYERS="128"
 IMG_SIZE=512
 # ============================================================================
