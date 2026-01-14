@@ -213,9 +213,9 @@ def train(config: dict):
             wandb.summary["test_f1"] = test_metrics["f1"]
             wandb.summary["test_auc"] = test_metrics["auc"]
 
-            # Log misclassified test samples as thumbnails
+            # Log misclassified test samples
             try:
-                _log_misclassified(model, test_dataset, device, thumbnail_size=64)
+                _log_misclassified(model, test_dataset, device)
             except Exception as e:
                 print(f"  Warning: Failed to log misclassified samples: {e}")
 
