@@ -61,7 +61,7 @@ export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 # Update these if you trained with different architecture:
 CHANNELS="32 64 128"
 FC_LAYERS="128"
-IMG_SIZE=256
+IMG_SIZE=512
 # ============================================================================
 
 # Run inference
