@@ -104,7 +104,7 @@ def predict_from_nc(
 
 def add_cloudy_seq_to_nc(
     nc_path: str | Path,
-    model_path: str | Path,
+    model: CloudyTileCNN,
     img_size: tuple[int, int] = (512, 512),
     threshold: float = 0.5,
     imagery_scale: float = 10000.0,
@@ -112,41 +112,117 @@ def add_cloudy_seq_to_nc(
     output_path: str | Path = None,
 ) -> xr.Dataset:
     """
-    Load a NetCDF file, run classifier on each timestep, add cloudy_seq variable.
+    Load a NetCDF file, run classifier on each timestep, add/overwrite cloudy_seq variable.
+
+    Args:
+        nc_path: Path to input NetCDF file
+        model: Loaded CloudyTileCNN model (use load_model to create)
+        img_size: Size to resize tiles to for inference
+        threshold: Classification threshold (default: 0.5)
+        imagery_scale: Scale factor for normalization (default: 10000.0)
+        batch_size: Number of frames to process at once
+        output_path: Path to save output (default: overwrite input)
+
+    Returns:
+        xarray Dataset with cloudy_seq variable added
     """
     nc_path = Path(nc_path)
     if output_path is None:
         output_path = nc_path
 
-    model = load_model(model_path, img_size=img_size)
-
     # Load dataset and get predictions
     ds = xr.open_dataset(nc_path)
-    
+
     cloudy_seq = predict_from_nc(
         model, ds, img_size=img_size, threshold=threshold,
         imagery_scale=imagery_scale, batch_size=batch_size
     )
 
-    # Create new dataset with cloudy_seq added (safer than modifying in place)
-    ds_out = xr.Dataset(
-        data_vars={
-            'imagery': ds['imagery'],
-            'water_area': ds['water_area'],
-            'cloudy_seq': (['time'], cloudy_seq, {
-                'long_name': 'tile usefulness classification',
-                'description': '1 = useful, 0 = not useful (cloudy/nodata)',
-                'model': str(model_path),
-                'threshold': threshold,
-            }),
-        },
-        coords=ds.coords,
-        attrs=ds.attrs,
+    # Drop existing cloudy_seq if it exists
+    if 'cloudy_seq' in ds:
+        ds = ds.drop_vars('cloudy_seq')
+
+    # Add new cloudy_seq variable
+    ds['cloudy_seq'] = xr.DataArray(
+        cloudy_seq.flatten(),
+        dims=['time'],
+        attrs={
+            'long_name': 'tile usefulness classification',
+            'description': '1 = useful, 0 = not useful (cloudy/nodata)',
+            'threshold': threshold,
+        }
     )
 
+    # Save to temp file then rename (atomic write)
+    temp_path = output_path.parent / f".{output_path.name}.tmp"
+    ds.to_netcdf(temp_path)
     ds.close()
+    temp_path.rename(output_path)
 
-    # Save
-    ds_out.to_netcdf(output_path)
+    return xr.open_dataset(output_path)
 
-    return ds_out
+
+def process_directory(
+    nc_dir: str | Path,
+    model_path: str | Path,
+    img_size: tuple[int, int] = (512, 512),
+    channels: list[int] = None,
+    fc_layers: list[int] = None,
+    threshold: float = 0.5,
+    imagery_scale: float = 10000.0,
+    batch_size: int = 32,
+    pattern: str = "*.nc",
+) -> int:
+    """
+    Add cloudy_seq to all NetCDF files in a directory.
+
+    Args:
+        nc_dir: Directory containing NetCDF files
+        model_path: Path to trained model weights
+        img_size: Image size model was trained with
+        channels: Conv layer channels (must match training)
+        fc_layers: FC layer sizes (must match training)
+        threshold: Classification threshold
+        imagery_scale: Scale factor for normalization
+        batch_size: Batch size for inference
+        pattern: Glob pattern for finding files (default: "*.nc")
+
+    Returns:
+        Number of files processed
+    """
+    nc_dir = Path(nc_dir)
+    nc_files = sorted(nc_dir.glob(pattern))
+
+    if not nc_files:
+        print(f"No files matching '{pattern}' found in {nc_dir}")
+        return 0
+
+    print(f"Found {len(nc_files)} files to process")
+
+    # Load model once
+    model = load_model(
+        model_path,
+        img_size=img_size,
+        channels=channels,
+        fc_layers=fc_layers,
+    )
+    print(f"Loaded model from {model_path}")
+
+    processed = 0
+    for nc_path in nc_files:
+        try:
+            add_cloudy_seq_to_nc(
+                nc_path,
+                model,
+                img_size=img_size,
+                threshold=threshold,
+                imagery_scale=imagery_scale,
+                batch_size=batch_size,
+            )
+            processed += 1
+            print(f"  [{processed}/{len(nc_files)}] {nc_path.name}")
+        except Exception as e:
+            print(f"  ERROR processing {nc_path.name}: {e}")
+
+    print(f"\nProcessed {processed}/{len(nc_files)} files")
+    return processed
