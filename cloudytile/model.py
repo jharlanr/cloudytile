@@ -14,7 +14,9 @@ class CloudyTileCNN(nn.Module):
         img_size: Input image size [height, width]. Default: (512, 512)
         channels: List of channel sizes for conv layers. Default: [16, 32, 64]
         fc_layers: List of hidden layer sizes for classifier. Default: [128]
-        in_channels: Number of input channels (3 for RGB). Default: 3
+        in_channels: Number of input channels. Default: 6
+            - 3 for RGB only (legacy JPG mode)
+            - 6 for RGB + NIR + SWIR1 + SWIR2 (multi-spectral NC mode)
 
     Input:
         x: Tensor of shape [B, in_channels, H, W] with values normalized to [0, 1]
@@ -28,7 +30,7 @@ class CloudyTileCNN(nn.Module):
         img_size: tuple[int, int] = (512, 512),
         channels: list[int] = None,
         fc_layers: list[int] = None,
-        in_channels: int = 3,
+        in_channels: int = 6,
     ):
         super().__init__()
 

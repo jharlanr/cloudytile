@@ -36,7 +36,7 @@ from torch.utils.data import DataLoader
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from cloudytile.data import CloudyTileDataset, create_splits
+from cloudytile.data import CloudyTileDataset, CloudyTileDatasetNC, create_splits
 from cloudytile.model import CloudyTileCNN
 from cloudytile.training import train_one_epoch, evaluate
 
@@ -81,16 +81,37 @@ def train(config: dict):
 
         # Create datasets
         img_size = (config.get("img_size", 512), config.get("img_size", 512))
-        train_dataset = CloudyTileDataset(
-            tmpdir / "train.csv",
-            config["image_dir"],
-            img_size=img_size,
-        )
-        val_dataset = CloudyTileDataset(
-            tmpdir / "val.csv",
-            config["image_dir"],
-            img_size=img_size,
-        )
+        use_nc = config.get("use_nc", False)
+        in_channels = config.get("in_channels", 6 if use_nc else 3)
+
+        if use_nc:
+            # Multi-spectral mode: load from NC files
+            nc_dir = config.get("nc_dir", config["image_dir"])
+            channels = config.get("nc_channels", ["red", "green", "blue", "nir", "swir1", "swir2"])
+            train_dataset = CloudyTileDatasetNC(
+                tmpdir / "train.csv",
+                nc_dir,
+                channels=channels,
+                img_size=img_size,
+            )
+            val_dataset = CloudyTileDatasetNC(
+                tmpdir / "val.csv",
+                nc_dir,
+                channels=channels,
+                img_size=img_size,
+            )
+        else:
+            # Legacy RGB mode: load from JPG files
+            train_dataset = CloudyTileDataset(
+                tmpdir / "train.csv",
+                config["image_dir"],
+                img_size=img_size,
+            )
+            val_dataset = CloudyTileDataset(
+                tmpdir / "val.csv",
+                config["image_dir"],
+                img_size=img_size,
+            )
 
         # Create loaders
         train_loader = DataLoader(
@@ -113,6 +134,7 @@ def train(config: dict):
             img_size=img_size,
             channels=config.get("channels", [16, 32, 64]),
             fc_layers=config.get("fc_layers", [128]),
+            in_channels=in_channels,
         ).to(device)
 
         # Loss and optimizer
@@ -177,11 +199,19 @@ def train(config: dict):
 
         # Final test evaluation
         test_df.to_csv(tmpdir / "test.csv", index=False)
-        test_dataset = CloudyTileDataset(
-            tmpdir / "test.csv",
-            config["image_dir"],
-            img_size=img_size,
-        )
+        if use_nc:
+            test_dataset = CloudyTileDatasetNC(
+                tmpdir / "test.csv",
+                nc_dir,
+                channels=channels,
+                img_size=img_size,
+            )
+        else:
+            test_dataset = CloudyTileDataset(
+                tmpdir / "test.csv",
+                config["image_dir"],
+                img_size=img_size,
+            )
         test_loader = DataLoader(
             test_dataset,
             batch_size=config.get("batch_size", 32),
@@ -301,6 +331,15 @@ def main():
     parser.add_argument("--wandb_name", type=str, default=None)
     parser.add_argument("--no_wandb", action="store_true",
                         help="Disable wandb logging")
+    parser.add_argument("--use_nc", action="store_true",
+                        help="Use NetCDF files instead of JPGs (multi-spectral mode)")
+    parser.add_argument("--nc_dir", type=str, default=None,
+                        help="Directory containing NC files (defaults to image_dir)")
+    parser.add_argument("--nc_channels", type=str, nargs="+",
+                        default=["red", "green", "blue", "nir", "swir1", "swir2"],
+                        help="Channels to load from NC files")
+    parser.add_argument("--in_channels", type=int, default=None,
+                        help="Number of input channels (auto-detected if not set)")
     args = parser.parse_args()
 
     config = vars(args)

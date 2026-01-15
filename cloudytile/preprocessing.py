@@ -6,7 +6,7 @@ import xarray as xr
 from pathlib import Path
 from PIL import Image
 import random
-from typing import Union
+from typing import Union, Optional, List
 
 def nc_to_rgb_array(
     ds: xr.Dataset,
@@ -192,3 +192,229 @@ def extract_frames_from_directory(
     print(f"Done. Generated {len(all_saved_paths)} JPG files and saved in {output_dir}")
 
     return all_saved_paths
+
+
+def extract_single_timestep_nc(
+    ds: xr.Dataset,
+    timestep: int,
+    output_path: Union[str, Path],
+    channels: Optional[List[str]] = None,
+) -> None:
+    """
+    Extract a single timestep from a NetCDF dataset and save as a new .nc file.
+
+    Args:
+        ds: xarray Dataset with 'imagery' variable [time, channel, y, x]
+        timestep: Index of timestep to extract
+        output_path: Path to save the single-timestep .nc file
+        channels: List of channel names to include. If None, includes all except 'mask'.
+            Default channels for training: ['red', 'green', 'blue', 'nir', 'swir1', 'swir2']
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Get available channels
+    available_channels = list(ds.coords["channel"].values)
+
+    # Default: include all channels except mask for training
+    if channels is None:
+        channels = [c for c in available_channels if c != "mask"]
+
+    # Filter to only available channels
+    channels_to_use = [c for c in channels if c in available_channels]
+
+    if not channels_to_use:
+        raise ValueError(f"No requested channels found. Available: {available_channels}")
+
+    # Extract single timestep and select channels
+    imagery = ds["imagery"].isel(time=timestep).sel(channel=channels_to_use)
+
+    # Create new dataset
+    ds_single = xr.Dataset(
+        data_vars={
+            "imagery": (["channel", "y", "x"], imagery.values),
+        },
+        coords={
+            "channel": channels_to_use,
+        },
+        attrs={
+            "lake_id": ds.attrs.get("lake_id", "unknown"),
+            "timestep": timestep,
+            "source_time": str(ds.coords["time"].values[timestep]),
+        },
+    )
+
+    ds_single.to_netcdf(output_path)
+
+
+def extract_frames_with_nc(
+    nc_path: Union[str, Path],
+    jpg_output_dir: Union[str, Path],
+    nc_output_dir: Union[str, Path],
+    sample_fraction: float = 0.3,
+    imagery_scale: float = 10000.0,
+    quality: int = 95,
+    seed: Optional[int] = None,
+    skip_existing: bool = True,
+    training_channels: Optional[List[str]] = None,
+) -> tuple[List[Path], List[Path]]:
+    """
+    Extract frames from a NetCDF timestack, saving both JPGs (for labeling) and
+    single-timestep .nc files (for training with extra spectral bands).
+
+    Args:
+        nc_path: Path to NetCDF file (combined datasets with imagery)
+        jpg_output_dir: Directory to save JPG files (for labeling)
+        nc_output_dir: Directory to save single-timestep .nc files (for training)
+        sample_fraction: Fraction of timesteps to sample (0-1, default: 0.3)
+        imagery_scale: Scale factor for normalization
+        quality: JPG quality
+        seed: Random seed for reproducibility
+        skip_existing: If True, skip files that already exist
+        training_channels: Channels to include in .nc files for training.
+            Default: ['red', 'green', 'blue', 'nir', 'swir1', 'swir2']
+
+    Returns:
+        Tuple of (jpg_paths, nc_paths)
+
+    Output filename format:
+        - JPG: {lake_id}_t{timestep:03d}.jpg
+        - NC:  {lake_id}_t{timestep:03d}.nc
+    """
+    nc_path = Path(nc_path)
+    jpg_output_dir = Path(jpg_output_dir)
+    nc_output_dir = Path(nc_output_dir)
+    jpg_output_dir.mkdir(parents=True, exist_ok=True)
+    nc_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if training_channels is None:
+        training_channels = ["red", "green", "blue", "nir", "swir1", "swir2"]
+
+    # Load dataset
+    ds = xr.open_dataset(nc_path)
+    n_timesteps = ds.sizes["time"]
+    lake_id = ds.attrs.get("lake_id", nc_path.stem)
+
+    # Determine which timesteps to sample
+    if seed is not None:
+        random.seed(seed)
+
+    n_samples = max(1, int(n_timesteps * sample_fraction))
+    timesteps = sorted(random.sample(range(n_timesteps), n_samples))
+
+    jpg_paths = []
+    nc_paths = []
+
+    for t in timesteps:
+        base_filename = f"{lake_id}_t{t:03d}"
+        jpg_path = jpg_output_dir / f"{base_filename}.jpg"
+        nc_single_path = nc_output_dir / f"{base_filename}.nc"
+
+        # Check if both already exist
+        jpg_exists = jpg_path.exists()
+        nc_exists = nc_single_path.exists()
+
+        if skip_existing and jpg_exists and nc_exists:
+            jpg_paths.append(jpg_path)
+            nc_paths.append(nc_single_path)
+            continue
+
+        # Extract and save JPG (for labeling)
+        if not (skip_existing and jpg_exists):
+            rgb = nc_to_rgb_array(ds, t, imagery_scale)
+            save_frame_as_jpg(rgb, jpg_path, quality)
+        jpg_paths.append(jpg_path)
+
+        # Extract and save single-timestep NC (for training)
+        if not (skip_existing and nc_exists):
+            extract_single_timestep_nc(ds, t, nc_single_path, channels=training_channels)
+        nc_paths.append(nc_single_path)
+
+    ds.close()
+
+    return jpg_paths, nc_paths
+
+
+def extract_frames_with_nc_from_directory(
+    input_dir: Union[str, Path],
+    jpg_output_dir: Union[str, Path],
+    nc_output_dir: Union[str, Path],
+    sample_fraction: float = 0.1,
+    max_files: Optional[int] = None,
+    imagery_scale: float = 10000.0,
+    quality: int = 95,
+    seed: int = 42,
+    skip_existing: bool = True,
+    training_channels: Optional[List[str]] = None,
+) -> tuple[List[Path], List[Path]]:
+    """
+    Extract frames from multiple NetCDF files, saving both JPGs and single-timestep .nc files.
+
+    Args:
+        input_dir: Directory containing processed .nc files (with spectral bands)
+        jpg_output_dir: Directory to save JPG files (for labeling)
+        nc_output_dir: Directory to save single-timestep .nc files (for training)
+        sample_fraction: Fraction of timesteps to sample from each file (default: 0.1)
+        max_files: Maximum number of .nc files to process (None = all)
+        imagery_scale: Scale factor for normalization
+        quality: JPG quality
+        seed: Random seed for reproducibility
+        skip_existing: If True, skip files that already exist
+        training_channels: Channels to include in .nc files.
+            Default: ['red', 'green', 'blue', 'nir', 'swir1', 'swir2']
+
+    Returns:
+        Tuple of (all_jpg_paths, all_nc_paths)
+
+    Example:
+        >>> jpg_paths, nc_paths = extract_frames_with_nc_from_directory(
+        ...     input_dir="data/processed_lakes/",
+        ...     jpg_output_dir="data/labeling_jpgs/",
+        ...     nc_output_dir="data/training_nc/",
+        ...     sample_fraction=0.15,
+        ... )
+        >>> print(f"Generated {len(jpg_paths)} JPGs for labeling")
+        >>> print(f"Generated {len(nc_paths)} NC files for training")
+    """
+    input_dir = Path(input_dir)
+    jpg_output_dir = Path(jpg_output_dir)
+    nc_output_dir = Path(nc_output_dir)
+
+    # Find all .nc files
+    nc_files = sorted(input_dir.glob("*.nc"))
+
+    if max_files is not None:
+        if seed is not None:
+            random.seed(seed)
+        nc_files = random.sample(nc_files, min(max_files, len(nc_files)))
+        nc_files = sorted(nc_files)
+
+    print(f"Processing {len(nc_files)} NetCDF files...")
+    print(f"  JPGs will be saved to: {jpg_output_dir}")
+    print(f"  Training NCs will be saved to: {nc_output_dir}")
+
+    all_jpg_paths = []
+    all_nc_paths = []
+
+    for i, nc_path in enumerate(nc_files):
+        print(f"  [{i+1}/{len(nc_files)}] {nc_path.name}")
+
+        jpg_paths, nc_paths = extract_frames_with_nc(
+            nc_path=nc_path,
+            jpg_output_dir=jpg_output_dir,
+            nc_output_dir=nc_output_dir,
+            sample_fraction=sample_fraction,
+            imagery_scale=imagery_scale,
+            quality=quality,
+            seed=seed + i if seed is not None else None,
+            skip_existing=skip_existing,
+            training_channels=training_channels,
+        )
+        all_jpg_paths.extend(jpg_paths)
+        all_nc_paths.extend(nc_paths)
+
+    print(f"Done!")
+    print(f"  Generated {len(all_jpg_paths)} JPG files for labeling")
+    print(f"  Generated {len(all_nc_paths)} NC files for training")
+
+    return all_jpg_paths, all_nc_paths
