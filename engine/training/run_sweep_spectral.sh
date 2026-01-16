@@ -37,6 +37,10 @@
 #    $ cd /oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile
 #    $ wandb sync wandb/offline-run-*
 #
+# 4. Check sweep status and resume if needed:
+#    $ wandb sweep --status jrines/cloudy-tile/XXXXXX
+#    If runs are still pending, submit more agents with the same command from step 2.
+#
 # =============================================================================
 
 # Check for sweep ID argument
