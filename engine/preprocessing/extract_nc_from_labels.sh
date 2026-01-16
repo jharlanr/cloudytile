@@ -78,7 +78,8 @@ python3 $REPO_DIR/engine/preprocessing/extract_nc_from_labels.py \
     --labels_csv $LABELS_CSV \
     --input_dir $INPUT_DIR \
     --output_dir $OUTPUT_DIR \
-    --channels $CHANNELS
+    --channels $CHANNELS \
+    --no_skip_existing
 
 echo ""
 echo "=============================================="
