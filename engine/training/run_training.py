@@ -29,6 +29,8 @@ def parse_list(value):
     # Fall back to space-separated integers
     return [int(x) for x in value.split()]
 
+import random
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -39,6 +41,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from cloudytile.data import CloudyTileDataset, CloudyTileDatasetNC, create_splits
 from cloudytile.model import CloudyTileCNN
 from cloudytile.training import train_one_epoch, evaluate
+
+
+def set_seed(seed: int):
+    """Set random seed for reproducibility across all libraries."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # For deterministic behavior (may slow down training slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 try:
     import wandb
@@ -53,6 +66,11 @@ VALID_METRICS = ["accuracy", "precision", "recall", "f1", "auc"]
 
 def train(config: dict):
     """Main training function."""
+    # Set seed for reproducible weight initialization
+    seed = config.get("seed", 42)
+    set_seed(seed)
+    print(f"Random seed: {seed}")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -82,26 +100,49 @@ def train(config: dict):
         # Create datasets
         img_size = (config.get("img_size", 512), config.get("img_size", 512))
         use_nc = config.get("use_nc", False)
-        in_channels = config.get("in_channels", 6 if use_nc else 3)
 
         if use_nc:
             # Multi-spectral mode: load from NC files
             nc_dir = config.get("nc_dir", config["image_dir"])
             channels = config.get("nc_channels", ["red", "green", "blue", "nir", "swir1", "swir2"])
+            # Auto-detect in_channels from channel list if not explicitly set
+            in_channels = config.get("in_channels") or len(channels)
+            # Create a readable band combo string for wandb grouping
+            band_combo = "+".join(channels)
+            print(f"Using {in_channels} channels: {channels}")
+
+            # Log band info to wandb for easy filtering
+            if WANDB_AVAILABLE and wandb.run is not None:
+                wandb.config.update({
+                    "band_combo": band_combo,
+                    "n_channels": in_channels,
+                    "has_nir": "nir" in channels,
+                    "has_swir1": "swir1" in channels,
+                    "has_swir2": "swir2" in channels,
+                }, allow_val_change=True)
+
+            # Get band statistics path for normalization
+            band_stats = config.get("band_stats")
+            if band_stats:
+                print(f"Using band statistics from: {band_stats}")
+
             train_dataset = CloudyTileDatasetNC(
                 tmpdir / "train.csv",
                 nc_dir,
                 channels=channels,
                 img_size=img_size,
+                band_stats=band_stats,
             )
             val_dataset = CloudyTileDatasetNC(
                 tmpdir / "val.csv",
                 nc_dir,
                 channels=channels,
                 img_size=img_size,
+                band_stats=band_stats,
             )
         else:
             # Legacy RGB mode: load from JPG files
+            in_channels = config.get("in_channels") or 3
             train_dataset = CloudyTileDataset(
                 tmpdir / "train.csv",
                 config["image_dir"],
@@ -205,6 +246,7 @@ def train(config: dict):
                 nc_dir,
                 channels=channels,
                 img_size=img_size,
+                band_stats=band_stats,
             )
         else:
             test_dataset = CloudyTileDataset(
@@ -340,6 +382,8 @@ def main():
                         help="Channels to load from NC files")
     parser.add_argument("--in_channels", type=int, default=None,
                         help="Number of input channels (auto-detected if not set)")
+    parser.add_argument("--band_stats", type=str, default=None,
+                        help="Path to JSON file with per-band normalization statistics")
     args = parser.parse_args()
 
     config = vars(args)

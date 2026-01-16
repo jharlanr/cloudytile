@@ -1,6 +1,7 @@
 """
 PyTorch Dataset for CloudyTile training.
 """
+import json
 import numpy as np
 import pandas as pd
 import torch
@@ -9,7 +10,22 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Dict
+
+
+def load_band_stats(stats_path: Union[str, Path]) -> Dict[str, Dict[str, float]]:
+    """
+    Load band statistics from JSON file.
+
+    Args:
+        stats_path: Path to JSON file with band statistics
+
+    Returns:
+        dict: Band statistics with format {"band_name": {"mean": X, "std": Y}, ...}
+    """
+    with open(stats_path, "r") as f:
+        stats = json.load(f)
+    return stats
 
 class CloudyTileDataset(Dataset):
     """
@@ -166,7 +182,11 @@ class CloudyTileDatasetNC(Dataset):
             (files should be like 'CW2019_1579_t003.nc')
         channels: List of channel names to load. Default: all available.
         img_size: Target image size (height, width). Default: (512, 512)
-        imagery_scale: Scale factor for normalization (default: 10000.0)
+        band_stats: Band statistics for normalization. Can be:
+            - Path to JSON file with stats
+            - Dict with format {"band_name": {"mean": X, "std": Y}, ...}
+            - None to skip normalization (not recommended)
+        imagery_scale: Scale factor for legacy normalization if band_stats=None
 
     Labels:
         0 = not useful (cloudy/no data)
@@ -178,6 +198,7 @@ class CloudyTileDatasetNC(Dataset):
         nc_dir: Union[str, Path],
         channels: Optional[List[str]] = None,
         img_size: tuple[int, int] = (512, 512),
+        band_stats: Optional[Union[str, Path, Dict]] = None,
         imagery_scale: float = 10000.0,
     ):
         self.labels_df = pd.read_csv(labels_csv)
@@ -185,6 +206,16 @@ class CloudyTileDatasetNC(Dataset):
         self.channels = channels
         self.img_size = img_size
         self.imagery_scale = imagery_scale
+
+        # Load band statistics
+        if band_stats is None:
+            print("Warning: No band_stats provided. Using simple /10000 normalization.")
+            self.band_stats = None
+        elif isinstance(band_stats, (str, Path)):
+            self.band_stats = load_band_stats(band_stats)
+            print(f"Loaded band statistics from {band_stats}")
+        else:
+            self.band_stats = band_stats
 
         # Convert jpg filenames to nc filenames
         self.labels_df["nc_filename"] = self.labels_df["filename"].str.replace(
@@ -235,9 +266,22 @@ class CloudyTileDatasetNC(Dataset):
             # Select channels
             imagery = ds["imagery"].sel(channel=self.channels).values  # [C, H, W]
 
-        # Normalize to [0, 1]
-        imagery = np.clip(imagery / self.imagery_scale, 0.0, 1.0)
+        # Replace NaNs with 0
         imagery = np.nan_to_num(imagery, nan=0.0)
+
+        # Normalize per-band using mean/std statistics
+        if self.band_stats is not None:
+            for i, ch in enumerate(self.channels):
+                if ch in self.band_stats:
+                    mean = self.band_stats[ch]["mean"]
+                    std = self.band_stats[ch]["std"]
+                    imagery[i] = (imagery[i] - mean) / std
+                else:
+                    # Fallback: simple scaling for unknown channels
+                    imagery[i] = imagery[i] / self.imagery_scale
+        else:
+            # Legacy normalization: simple division
+            imagery = np.clip(imagery / self.imagery_scale, 0.0, 1.0)
 
         # Resize if needed
         if imagery.shape[1:] != self.img_size:
