@@ -25,6 +25,9 @@ ml py-numpy/1.26.3_py312
 # Install xarray if needed
 pip install --user xarray netcdf4
 
+# Force unbuffered Python output for real-time logging
+export PYTHONUNBUFFERED=1
+
 # =============================================================================
 # CONFIGURE THESE PATHS
 # =============================================================================
