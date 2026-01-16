@@ -9,6 +9,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
+#SBATCH -C "GPU_MEM:40GB|GPU_MEM:80GB&GPU_SKU:A100"
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jrines@stanford.edu
 
