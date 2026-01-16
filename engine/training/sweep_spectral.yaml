@@ -31,9 +31,6 @@ parameters:
       - [128]
       - [128, 64]
 
-  use_scheduler:
-    value: true
-
   # Match the sweep metric goal
   optimize_metric:
     value: precision
@@ -88,10 +85,6 @@ parameters:
       # Full 6-channel (RGB + NIR + SWIR16 + SWIR22)
       - [red, green, blue, nir, swir16, swir22]
 
-  # Enable NC mode for spectral bands
-  use_nc:
-    value: true
-
 command:
   - ${env}
   - python3
@@ -104,4 +97,6 @@ command:
   - /oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc
   - --band_stats
   - /oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json
+  - --use_nc
+  - --use_scheduler
   - ${args}
