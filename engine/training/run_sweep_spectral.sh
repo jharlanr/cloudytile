@@ -9,7 +9,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
-#SBATCH -C "GPU_MEM:40GB|GPU_MEM:80GB&GPU_SKU:A100"
+#SBATCH -C "GPU_SKU:A100"
+#SBATCH --array=0-359%8
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jrines@stanford.edu
 
@@ -32,7 +33,8 @@
 #    # Example: sbatch run_sweep_spectral.sh jrines/cloudy-tile/abc123xyz
 #
 #    To submit multiple parallel agents (recommended for 360 runs):
-#    $ for i in {1..10}; do sbatch run_sweep_spectral.sh jrines/cloudy-tile/abc123xyz; done
+#    $ for i in {1..4}; do sbatch run_sweep_spectral.sh jrines/cloudy-tile/abc123xyz; done
+#    NOTE: limit to 4 jobs on serc partition (can go up to 8 if on a deadline, but should touch base with admin first)
 #
 # 3. After jobs complete, sync from LOGIN NODE:
 #    $ cd /oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile
