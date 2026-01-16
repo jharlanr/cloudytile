@@ -41,13 +41,13 @@ parameters:
   # ==========================================================================
   # SPECTRAL BAND COMBINATIONS
   # ==========================================================================
-  # Format: [channel_list, in_channels]
+  # Sentinel-2 band naming:
+  #   swir16 = Band 11 (1.6μm SWIR)
+  #   swir22 = Band 12 (2.2μm SWIR)
   #
   # Base combinations:
-  #   RGB, RGB+SWIR1, RGB+SWIR2, RB+SWIR1, RB+SWIR2, B+SWIR1, B+SWIR2
-  # Each with and without NIR = 14 total combinations
-  #
-  # Note: nc_channels is a list of band names, in_channels is the count
+  #   RGB, RGB+SWIR16, RGB+SWIR22, RB+SWIR16, RB+SWIR22, B+SWIR16, B+SWIR22
+  # Each with and without NIR = 14 total combinations + full 6-channel
   # ==========================================================================
 
   nc_channels:
@@ -55,38 +55,38 @@ parameters:
       # --- WITHOUT NIR ---
       # RGB only (3 channels)
       - [red, green, blue]
-      # RGB + SWIR1 (4 channels)
-      - [red, green, blue, swir1]
-      # RGB + SWIR2 (4 channels)
-      - [red, green, blue, swir2]
-      # RB + SWIR1 (3 channels) - no green
-      - [red, blue, swir1]
-      # RB + SWIR2 (3 channels) - no green
-      - [red, blue, swir2]
-      # B + SWIR1 (2 channels)
-      - [blue, swir1]
-      # B + SWIR2 (2 channels)
-      - [blue, swir2]
+      # RGB + SWIR16 (4 channels)
+      - [red, green, blue, swir16]
+      # RGB + SWIR22 (4 channels)
+      - [red, green, blue, swir22]
+      # RB + SWIR16 (3 channels) - no green
+      - [red, blue, swir16]
+      # RB + SWIR22 (3 channels) - no green
+      - [red, blue, swir22]
+      # B + SWIR16 (2 channels)
+      - [blue, swir16]
+      # B + SWIR22 (2 channels)
+      - [blue, swir22]
 
       # --- WITH NIR ---
       # RGB + NIR (4 channels)
       - [red, green, blue, nir]
-      # RGB + NIR + SWIR1 (5 channels)
-      - [red, green, blue, nir, swir1]
-      # RGB + NIR + SWIR2 (5 channels)
-      - [red, green, blue, nir, swir2]
-      # RB + NIR + SWIR1 (4 channels)
-      - [red, blue, nir, swir1]
-      # RB + NIR + SWIR2 (4 channels)
-      - [red, blue, nir, swir2]
-      # B + NIR + SWIR1 (3 channels)
-      - [blue, nir, swir1]
-      # B + NIR + SWIR2 (3 channels)
-      - [blue, nir, swir2]
+      # RGB + NIR + SWIR16 (5 channels)
+      - [red, green, blue, nir, swir16]
+      # RGB + NIR + SWIR22 (5 channels)
+      - [red, green, blue, nir, swir22]
+      # RB + NIR + SWIR16 (4 channels)
+      - [red, blue, nir, swir16]
+      # RB + NIR + SWIR22 (4 channels)
+      - [red, blue, nir, swir22]
+      # B + NIR + SWIR16 (3 channels)
+      - [blue, nir, swir16]
+      # B + NIR + SWIR22 (3 channels)
+      - [blue, nir, swir22]
 
       # --- ALL BANDS ---
-      # Full 6-channel (RGB + NIR + SWIR1 + SWIR2)
-      - [red, green, blue, nir, swir1, swir2]
+      # Full 6-channel (RGB + NIR + SWIR16 + SWIR22)
+      - [red, green, blue, nir, swir16, swir22]
 
   # Enable NC mode for spectral bands
   use_nc:

@@ -42,7 +42,7 @@ pip install --user xarray netcdf4
 LABELS_CSV="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile/labels.csv"
 
 # Directory containing processed lake .nc files (from lake-vision preprocessing)
-# These should have spectral bands: red, green, blue, nir, swir1, swir2, mask
+# These should have spectral bands: red, green, blue, nir, swir16, swir22, mask
 INPUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_processed"
 
 # Directory to save single-timestep .nc files for training
@@ -52,7 +52,8 @@ OUTPUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc"
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
 
 # Channels to include in training NC files (mask is excluded by default)
-CHANNELS="red green blue nir swir1 swir2"
+# Note: Sentinel-2 uses 'swir16' (band 11, 1.6μm) and 'swir22' (band 12, 2.2μm)
+CHANNELS="red green blue nir swir16 swir22"
 
 # =============================================================================
 # RUN EXTRACTION
