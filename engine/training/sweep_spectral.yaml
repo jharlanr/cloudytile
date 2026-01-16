@@ -99,4 +99,5 @@ command:
   - /oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json
   - --use_nc
   - --use_scheduler
+  - "true"
   - ${args}
