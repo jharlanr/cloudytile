@@ -30,7 +30,10 @@
 #    $ sbatch run_sweep_spectral.sh <USERNAME>/<PROJECT>/<SWEEP_ID>
 #    # Example: sbatch run_sweep_spectral.sh jrines/cloudy-tile/abc123xyz
 #
-# 3. After job completes, sync from LOGIN NODE:
+#    To submit multiple parallel agents (recommended for 360 runs):
+#    $ for i in {1..10}; do sbatch run_sweep_spectral.sh jrines/cloudy-tile/abc123xyz; done
+#
+# 3. After jobs complete, sync from LOGIN NODE:
 #    $ cd /oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile
 #    $ wandb sync wandb/offline-run-*
 #
