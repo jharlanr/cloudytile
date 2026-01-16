@@ -29,6 +29,21 @@ def parse_list(value):
     # Fall back to space-separated integers
     return [int(x) for x in value.split()]
 
+
+def parse_string_list(value):
+    """Parse a list of strings (handles both "['a','b']" and "a b" formats)."""
+    if isinstance(value, list):
+        return value
+    # Try to parse as Python literal (handles ['a', 'b'] format from wandb)
+    try:
+        parsed = ast.literal_eval(value)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+    except (ValueError, SyntaxError):
+        pass
+    # Fall back to space-separated strings
+    return value.split()
+
 import random
 import numpy as np
 import torch
@@ -377,9 +392,9 @@ def main():
                         help="Use NetCDF files instead of JPGs (multi-spectral mode)")
     parser.add_argument("--nc_dir", type=str, default=None,
                         help="Directory containing NC files (defaults to image_dir)")
-    parser.add_argument("--nc_channels", type=str, nargs="+",
+    parser.add_argument("--nc_channels", type=parse_string_list,
                         default=["red", "green", "blue", "nir", "swir1", "swir2"],
-                        help="Channels to load from NC files")
+                        help="Channels to load from NC files (e.g., 'red green blue' or \"['red','green','blue']\")")
     parser.add_argument("--in_channels", type=int, default=None,
                         help="Number of input channels (auto-detected if not set)")
     parser.add_argument("--band_stats", type=str, default=None,
