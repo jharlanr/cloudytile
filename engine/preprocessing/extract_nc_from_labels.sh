@@ -39,11 +39,11 @@ pip install --user xarray netcdf4
 # =============================================================================
 
 # Path to your existing labels CSV (with 'filename' and 'label' columns)
-LABELS_CSV="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/labels.csv"
+LABELS_CSV="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile/labels.csv"
 
 # Directory containing processed lake .nc files (from lake-vision preprocessing)
 # These should have spectral bands: red, green, blue, nir, swir1, swir2, mask
-INPUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/processed"
+INPUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_processed"
 
 # Directory to save single-timestep .nc files for training
 OUTPUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc"
