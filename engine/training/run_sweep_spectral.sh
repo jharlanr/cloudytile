@@ -10,7 +10,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH -C "GPU_SKU:A100"
-#SBATCH --array=0-359%8
+#SBATCH --array=0-7
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jrines@stanford.edu
 
@@ -117,8 +117,8 @@ echo ""
 
 # Run the sweep agent
 # Grid sweep: 15 bands x 3 lr x 2 batch x 2 channels x 2 fc = 360 runs
-# Remove --count to run entire grid, or set to limit
-wandb agent $SWEEP_PATH
+# Using --count to limit runs per agent for offline coordination
+wandb agent --count 30 $SWEEP_PATH
 
 echo ""
 echo "========================================"

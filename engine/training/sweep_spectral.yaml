@@ -7,16 +7,16 @@ metric:
 
 parameters:
   lr:
-    values: [1e-4, 1e-3, 1e-2]
+    values: [1e-3]
 
   batch_size:
-    values: [16, 32]
+    values: [32]
 
   weight_decay:
     value: 1e-4
 
   epochs:
-    value: 200
+    value: 100
 
   img_size:
     value: 512
@@ -24,12 +24,10 @@ parameters:
   channels:
     values:
       - [16, 32, 64]
-      - [32, 64, 128]
 
   fc_layers:
     values:
       - [128]
-      - [128, 64]
 
   # Match the sweep metric goal
   optimize_metric:
