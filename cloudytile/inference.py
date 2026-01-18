@@ -1,18 +1,31 @@
 """
 Inference utilities for CloudytileCNN model.
 """
+import json
 import numpy as np
 import torch
 import xarray as xr
 from pathlib import Path
+from typing import Optional, Union
 
 from .model import CloudyTileCNN
+
+
+# Available spectral bands in NC files
+AVAILABLE_BANDS = ['red', 'green', 'blue', 'nir', 'swir16', 'swir22']
+
+
+def load_band_stats(stats_path: Union[str, Path]) -> dict:
+    """Load band statistics from JSON file."""
+    with open(stats_path, "r") as f:
+        return json.load(f)
 
 def load_model(
     weights_path: str | Path,
     img_size: tuple[int, int] = (512, 512),
     channels: list[int] = None,
     fc_layers: list[int] = None,
+    in_channels: int = 3,
     device: str = None,
 ) -> CloudyTileCNN:
     """
@@ -23,6 +36,7 @@ def load_model(
         img_size: Input image size model was trained with
         channels: Convolutional channel sizes (must match training)
         fc_layers: fully-connected layer sizes (must match training)
+        in_channels: Number of input channels (must match training, default: 3 for RGB)
         device: device to load model on ('cuda', 'cpu' or None for auto)
 
     Returns:
@@ -35,6 +49,7 @@ def load_model(
         img_size=img_size,
         channels=channels,
         fc_layers=fc_layers,
+        in_channels=in_channels,
     )
     model.load_state_dict(torch.load(weights_path, map_location=device))
     model.to(device)
@@ -47,7 +62,8 @@ def predict_from_nc(
     ds: xr.Dataset,
     img_size: tuple[int, int] = (512, 512),
     threshold: float = 0.5,
-    rgb_indices: tuple[int, int, int] = (0, 1, 2),
+    nc_channels: list[str] = None,
+    band_stats: Optional[dict] = None,
     imagery_scale: float = 10000.0,
     batch_size: int = 32,
 ) -> np.ndarray:
@@ -59,8 +75,11 @@ def predict_from_nc(
         ds: xarray Dataset with 'imagery' variable of shape [time, channel, y, x]
         img_size: Size to resize tiles to for inference
         threshold: Classification threshold
-        rgb_indices: Indices of R, G, B channels in the channel dimension
-        imagery_scale: Scale factor for normalization (default: 10000.0 for Sentinel-2)
+        nc_channels: List of channel names to use (e.g., ['red', 'green', 'blue'] or
+            ['blue', 'nir', 'swir16']). Default: ['red', 'green', 'blue']
+        band_stats: Dict with band statistics for normalization. If None, uses simple
+            /imagery_scale normalization.
+        imagery_scale: Scale factor for legacy normalization (default: 10000.0)
         batch_size: Number of frames to process at once
 
     Returns:
@@ -68,21 +87,50 @@ def predict_from_nc(
     """
     device = next(model.parameters()).device
 
+    # Default to RGB
+    if nc_channels is None:
+        nc_channels = ['red', 'green', 'blue']
+
+    # Get channel names from NC file
+    nc_channel_names = list(ds.coords['channel'].values)
+
+    # Find indices for requested channels
+    channel_indices = []
+    for ch in nc_channels:
+        if ch in nc_channel_names:
+            channel_indices.append(nc_channel_names.index(ch))
+        else:
+            raise ValueError(f"Channel '{ch}' not found in NC file. Available: {nc_channel_names}")
+
     # Extract imagery: [time, channel, y, x]
     imagery = ds["imagery"].values
 
-    # Select RGB channels: [time, 3, y, x]
-    rgb = imagery[:, rgb_indices, :, :]
-    n_frames = rgb.shape[0]
+    # Select requested channels: [time, n_channels, y, x]
+    selected = imagery[:, channel_indices, :, :].copy()
+    n_frames = selected.shape[0]
 
-    # Normalize to [0, 1] (matches lake-vision datasets.py)
-    rgb = np.clip(rgb / imagery_scale, 0.0, 1.0)
+    # Handle NaNs
+    selected = np.nan_to_num(selected, nan=0.0)
+
+    # Normalize per-band
+    if band_stats is not None:
+        for i, ch in enumerate(nc_channels):
+            if ch in band_stats:
+                mean = band_stats[ch]['mean']
+                std = band_stats[ch]['std']
+                selected[:, i, :, :] = (selected[:, i, :, :] - mean) / std
+            else:
+                # Fallback for unknown channels
+                selected[:, i, :, :] = selected[:, i, :, :] / imagery_scale
+    else:
+        # Legacy normalization
+        selected = np.clip(selected / imagery_scale, 0.0, 1.0)
 
     predictions = []
 
     # process in batches
     for i in range(0, n_frames, batch_size):
-        batch = rgb[i : i+batch_size]
+        batch = selected[i : i+batch_size]
         batch_tensor = torch.from_numpy(batch).float()
 
         # resize if needed
@@ -107,9 +155,12 @@ def add_cloudy_seq_to_nc(
     model: CloudyTileCNN,
     img_size: tuple[int, int] = (512, 512),
     threshold: float = 0.5,
+    nc_channels: list[str] = None,
+    band_stats: Optional[dict] = None,
     imagery_scale: float = 10000.0,
     batch_size: int = 32,
     output_path: str | Path = None,
+    var_name: str = 'cloudy_seq',
 ) -> xr.Dataset:
     """
     Load a NetCDF file, run classifier on each timestep, add/overwrite cloudy_seq variable.
@@ -119,9 +170,12 @@ def add_cloudy_seq_to_nc(
         model: Loaded CloudyTileCNN model (use load_model to create)
         img_size: Size to resize tiles to for inference
         threshold: Classification threshold (default: 0.5)
+        nc_channels: List of channel names to use (e.g., ['red', 'green', 'blue'])
+        band_stats: Dict with band statistics for normalization
         imagery_scale: Scale factor for normalization (default: 10000.0)
         batch_size: Number of frames to process at once
         output_path: Path to save output (default: overwrite input)
+        var_name: Name for the output variable (default: 'cloudy_seq')
 
     Returns:
         xarray Dataset with cloudy_seq variable added
@@ -135,21 +189,26 @@ def add_cloudy_seq_to_nc(
 
     cloudy_seq = predict_from_nc(
         model, ds, img_size=img_size, threshold=threshold,
+        nc_channels=nc_channels, band_stats=band_stats,
         imagery_scale=imagery_scale, batch_size=batch_size
     )
 
-    # Drop existing cloudy_seq if it exists
-    if 'cloudy_seq' in ds:
-        ds = ds.drop_vars('cloudy_seq')
+    # Drop existing variable if it exists
+    if var_name in ds:
+        ds = ds.drop_vars(var_name)
 
-    # Add new cloudy_seq variable
-    ds['cloudy_seq'] = xr.DataArray(
+    # Build description of channels used
+    channels_str = ','.join(nc_channels) if nc_channels else 'red,green,blue'
+
+    # Add new variable
+    ds[var_name] = xr.DataArray(
         cloudy_seq.flatten(),
         dims=['time'],
         attrs={
             'long_name': 'tile usefulness classification',
             'description': '1 = useful, 0 = not useful (cloudy/nodata)',
             'threshold': threshold,
+            'channels': channels_str,
         }
     )
 
@@ -168,10 +227,13 @@ def process_directory(
     img_size: tuple[int, int] = (512, 512),
     channels: list[int] = None,
     fc_layers: list[int] = None,
+    nc_channels: list[str] = None,
+    band_stats_path: Optional[str | Path] = None,
     threshold: float = 0.5,
     imagery_scale: float = 10000.0,
     batch_size: int = 32,
     pattern: str = "*.nc",
+    var_name: str = 'cloudy_seq',
 ) -> int:
     """
     Add cloudy_seq to all NetCDF files in a directory.
@@ -182,10 +244,13 @@ def process_directory(
         img_size: Image size model was trained with
         channels: Conv layer channels (must match training)
         fc_layers: FC layer sizes (must match training)
+        nc_channels: List of channel names to use (e.g., ['red', 'green', 'blue'])
+        band_stats_path: Path to band statistics JSON file
         threshold: Classification threshold
         imagery_scale: Scale factor for normalization
         batch_size: Batch size for inference
         pattern: Glob pattern for finding files (default: "*.nc")
+        var_name: Name for the output variable (default: 'cloudy_seq')
 
     Returns:
         Number of files processed
@@ -199,14 +264,25 @@ def process_directory(
 
     print(f"Found {len(nc_files)} files to process")
 
+    # Determine number of input channels
+    in_channels = len(nc_channels) if nc_channels else 3
+
     # Load model once
     model = load_model(
         model_path,
         img_size=img_size,
         channels=channels,
         fc_layers=fc_layers,
+        in_channels=in_channels,
     )
     print(f"Loaded model from {model_path}")
+    print(f"Using channels: {nc_channels or ['red', 'green', 'blue']}")
+
+    # Load band stats if provided
+    band_stats = None
+    if band_stats_path:
+        band_stats = load_band_stats(band_stats_path)
+        print(f"Loaded band statistics from {band_stats_path}")
 
     processed = 0
     for nc_path in nc_files:
@@ -216,8 +292,11 @@ def process_directory(
                 model,
                 img_size=img_size,
                 threshold=threshold,
+                nc_channels=nc_channels,
+                band_stats=band_stats,
                 imagery_scale=imagery_scale,
                 batch_size=batch_size,
+                var_name=var_name,
             )
             processed += 1
             print(f"  [{processed}/{len(nc_files)}] {nc_path.name}")
