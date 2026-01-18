@@ -138,7 +138,7 @@ python3 "$REPO_DIR/engine/training/run_training.py" \
     --channels "$CHANNELS" \
     --fc_layers "$FC_LAYERS" \
     --nc_channels "$NC_CHANNELS" \
-    --optimize_metric precision \
+    --optimize_metric loss \
     --save_path "$SAVE_PATH"
 
 EXIT_CODE=$?
