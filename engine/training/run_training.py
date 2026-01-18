@@ -76,7 +76,7 @@ except ImportError:
     print("wandb not installed, logging disabled")
 
 
-VALID_METRICS = ["accuracy", "precision", "recall", "f1", "auc"]
+VALID_METRICS = ["accuracy", "precision", "recall", "f1", "auc", "loss"]
 
 
 def train(config: dict):
@@ -209,7 +209,8 @@ def train(config: dict):
             )
 
         # Training loop
-        best_metric_value = 0.0
+        # For loss, lower is better; for other metrics, higher is better
+        best_metric_value = float("inf") if opt_metric == "loss" else 0.0
         epochs = config.get("epochs", 20)
 
         for epoch in range(epochs):
@@ -246,8 +247,14 @@ def train(config: dict):
                 wandb.log(log_dict)
 
             # Save best model based on chosen metric
-            current_metric = val_metrics[opt_metric]
-            if current_metric > best_metric_value:
+            if opt_metric == "loss":
+                current_metric = val_loss
+                is_better = current_metric < best_metric_value
+            else:
+                current_metric = val_metrics[opt_metric]
+                is_better = current_metric > best_metric_value
+
+            if is_better:
                 best_metric_value = current_metric
                 if config.get("save_path"):
                     torch.save(model.state_dict(), config["save_path"])
