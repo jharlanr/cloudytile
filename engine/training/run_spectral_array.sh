@@ -130,6 +130,9 @@ echo "Starting training..."
 echo "Start time: $(date)"
 echo ""
 
+# Record start time for duration calculation
+START_TIME=$(date +%s)
+
 # Run training and capture exit code
 python3 "$REPO_DIR/engine/training/run_training.py" \
     --labels_csv "$LABELS_CSV" \
@@ -150,17 +153,25 @@ python3 "$REPO_DIR/engine/training/run_training.py" \
 
 EXIT_CODE=$?
 
+# Calculate duration
+END_TIME=$(date +%s)
+DURATION_SEC=$((END_TIME - START_TIME))
+DURATION_MIN=$((DURATION_SEC / 60))
+DURATION_HR=$((DURATION_MIN / 60))
+DURATION_MIN_REM=$((DURATION_MIN % 60))
+
 echo ""
 echo "End time: $(date)"
+echo "Duration: ${DURATION_HR}h ${DURATION_MIN_REM}m (${DURATION_SEC}s total)"
 echo "Exit code: $EXIT_CODE"
 
 # Write status to shared log file (with file locking to avoid race conditions)
 {
     flock -x 200
     if [ $EXIT_CODE -eq 0 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') | Task $SLURM_ARRAY_TASK_ID | SUCCESS | $BANDS" >> "$STATUS_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') | Task $SLURM_ARRAY_TASK_ID | SUCCESS | ${DURATION_HR}h${DURATION_MIN_REM}m | $BANDS" >> "$STATUS_LOG"
     else
-        echo "$(date '+%Y-%m-%d %H:%M:%S') | Task $SLURM_ARRAY_TASK_ID | FAILED (exit $EXIT_CODE) | $BANDS" >> "$STATUS_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') | Task $SLURM_ARRAY_TASK_ID | FAILED (exit $EXIT_CODE) | ${DURATION_HR}h${DURATION_MIN_REM}m | $BANDS" >> "$STATUS_LOG"
     fi
 } 200>"$STATUS_LOG.lock"
 
@@ -176,5 +187,8 @@ echo "=============================================="
 echo ""
 echo "To sync wandb runs after all jobs complete:"
 echo "  wandb sync $SHERLOCK_DIR/wandb/offline-run-*"
+echo ""
+echo "To sync only runs from a specific date (e.g., Jan 17, 2026):"
+echo "  wandb sync $SHERLOCK_DIR/wandb/offline-run-20260117-*"
 
 exit $EXIT_CODE
