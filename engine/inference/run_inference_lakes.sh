@@ -2,7 +2,7 @@
 #SBATCH --job-name=inference_lakes
 #SBATCH --output=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs/%x_%A_%a.out
 #SBATCH --error=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs/%x_%A_%a.err
-#SBATCH --time=08:00:00
+#SBATCH --time=24:00:00
 #SBATCH -p serc
 #SBATCH --gpus=1
 #SBATCH --nodes=1
@@ -10,7 +10,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32GB
 #SBATCH -C GPU_SKU:A100_SXM4
-#SBATCH --array=0-2
+#SBATCH --array=0-2%1
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jrines@stanford.edu
 
