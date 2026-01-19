@@ -183,15 +183,25 @@ def add_cloudy_seq_to_nc(
     nc_path = Path(nc_path)
     if output_path is None:
         output_path = nc_path
+    else:
+        output_path = Path(output_path)
 
-    # Load dataset and get predictions
-    ds = xr.open_dataset(nc_path)
+    # If output file already exists, load from there to preserve existing variables
+    # (allows multiple models to add their cloudy_seq_* variables sequentially)
+    if output_path.exists() and output_path != nc_path:
+        ds = xr.open_dataset(output_path)
+    else:
+        ds = xr.open_dataset(nc_path)
 
+    # Get predictions (always from input file for imagery)
+    input_ds = xr.open_dataset(nc_path) if output_path.exists() and output_path != nc_path else ds
     cloudy_seq = predict_from_nc(
-        model, ds, img_size=img_size, threshold=threshold,
+        model, input_ds, img_size=img_size, threshold=threshold,
         nc_channels=nc_channels, band_stats=band_stats,
         imagery_scale=imagery_scale, batch_size=batch_size
     )
+    if input_ds is not ds:
+        input_ds.close()
 
     # Drop existing variable if it exists
     if var_name in ds:
@@ -234,6 +244,7 @@ def process_directory(
     batch_size: int = 32,
     pattern: str = "*.nc",
     var_name: str = 'cloudy_seq',
+    output_dir: Optional[str | Path] = None,
 ) -> int:
     """
     Add cloudy_seq to all NetCDF files in a directory.
@@ -251,12 +262,19 @@ def process_directory(
         batch_size: Batch size for inference
         pattern: Glob pattern for finding files (default: "*.nc")
         var_name: Name for the output variable (default: 'cloudy_seq')
+        output_dir: Directory to save output files (default: overwrite input files in-place)
 
     Returns:
         Number of files processed
     """
     nc_dir = Path(nc_dir)
     nc_files = sorted(nc_dir.glob(pattern))
+
+    # Set up output directory if specified
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Output directory: {output_dir}")
 
     if not nc_files:
         print(f"No files matching '{pattern}' found in {nc_dir}")
@@ -286,6 +304,12 @@ def process_directory(
 
     processed = 0
     for nc_path in nc_files:
+        # Determine output path
+        if output_dir is not None:
+            out_path = output_dir / nc_path.name
+        else:
+            out_path = None  # Will overwrite input file
+
         try:
             add_cloudy_seq_to_nc(
                 nc_path,
@@ -296,6 +320,7 @@ def process_directory(
                 band_stats=band_stats,
                 imagery_scale=imagery_scale,
                 batch_size=batch_size,
+                output_path=out_path,
                 var_name=var_name,
             )
             processed += 1

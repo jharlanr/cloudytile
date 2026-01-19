@@ -76,6 +76,7 @@ MODELS_DIR="$SHERLOCK_DIR/models"
 MODEL_PATH="$MODELS_DIR/${MODEL_NAME}.pth"
 BAND_STATS="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json"
 NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_processed"
+OUTPUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_with_cloudyseq"
 
 # Check model exists
 if [ ! -f "$MODEL_PATH" ]; then
@@ -104,10 +105,14 @@ export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 
 cd $SHERLOCK_DIR
 
+# Create output directory
+mkdir -p $OUTPUT_DIR
+
 echo ""
 echo "Starting inference..."
 echo "Model path: $MODEL_PATH"
 echo "NC directory: $NC_DIR"
+echo "Output directory: $OUTPUT_DIR"
 echo "Band stats: $BAND_STATS"
 echo "Start time: $(date)"
 echo ""
@@ -123,6 +128,7 @@ from cloudytile.inference import process_directory
 
 # Configuration
 nc_dir = "$NC_DIR"
+output_dir = "$OUTPUT_DIR"
 model_path = "$MODEL_PATH"
 band_stats_path = "$BAND_STATS"
 nc_channels = "$BANDS".split(",")
@@ -148,6 +154,7 @@ n_processed = process_directory(
     batch_size=64,
     pattern="*.nc",
     var_name=var_name,
+    output_dir=output_dir,
 )
 
 print(f"\nCompleted: {n_processed} files processed")
