@@ -2,6 +2,9 @@
 Inference utilities for CloudytileCNN model.
 """
 import json
+import sys
+import time
+from datetime import datetime, timedelta
 import numpy as np
 import torch
 import xarray as xr
@@ -302,8 +305,18 @@ def process_directory(
         band_stats = load_band_stats(band_stats_path)
         print(f"Loaded band statistics from {band_stats_path}")
 
+    # Progress tracking
+    total_files = len(nc_files)
     processed = 0
-    for nc_path in nc_files:
+    failed = 0
+    start_time = time.time()
+    last_checkpoint = start_time
+
+    print(f"\nStarting inference at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+    sys.stdout.flush()
+
+    for i, nc_path in enumerate(nc_files):
         # Determine output path
         if output_dir is not None:
             out_path = output_dir / nc_path.name
@@ -324,9 +337,41 @@ def process_directory(
                 var_name=var_name,
             )
             processed += 1
-            print(f"  [{processed}/{len(nc_files)}] {nc_path.name}")
         except Exception as e:
-            print(f"  ERROR processing {nc_path.name}: {e}")
+            print(f"  [{i+1}/{total_files}] ERROR processing {nc_path.name}: {e}")
+            failed += 1
+            sys.stdout.flush()
+            continue
 
-    print(f"\nProcessed {processed}/{len(nc_files)} files")
+        # Print progress every 50 files or every 5 minutes
+        current_time = time.time()
+        if (i + 1) % 50 == 0 or (current_time - last_checkpoint) > 300:
+            elapsed = current_time - start_time
+            rate = (i + 1) / elapsed if elapsed > 0 else 0
+            remaining = (total_files - i - 1) / rate if rate > 0 else 0
+
+            elapsed_str = str(timedelta(seconds=int(elapsed)))
+            remaining_str = str(timedelta(seconds=int(remaining)))
+
+            print(f"  [{i+1}/{total_files}] {nc_path.name} | "
+                  f"Elapsed: {elapsed_str} | "
+                  f"ETA: {remaining_str} | "
+                  f"Rate: {rate:.2f} files/sec | "
+                  f"Time: {datetime.now().strftime('%H:%M:%S')}")
+            sys.stdout.flush()
+            last_checkpoint = current_time
+
+    # Final summary
+    end_time = time.time()
+    total_elapsed = end_time - start_time
+    total_elapsed_str = str(timedelta(seconds=int(total_elapsed)))
+
+    print("=" * 60)
+    print(f"Completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Total time: {total_elapsed_str}")
+    print(f"Processed: {processed} successful, {failed} failed")
+    if total_elapsed > 0:
+        print(f"Average rate: {processed / total_elapsed:.2f} files/sec")
+    sys.stdout.flush()
+
     return processed
