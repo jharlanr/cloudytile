@@ -108,13 +108,23 @@ add_cloudy_seq_to_nc(
     var_name='cloudy_seq_rgb',  # Custom output variable name
 )
 
-# Process entire directory
+# Process entire directory (in-place)
 process_directory(
     nc_dir="/path/to/nc/files",
     model_path="cloudytile_rgb.pth",
     nc_channels=['red', 'green', 'blue'],
     band_stats_path="band_stats.json",
     var_name='cloudy_seq_rgb',
+)
+
+# Process directory with separate output (preserves originals)
+process_directory(
+    nc_dir="/path/to/input/files",
+    model_path="cloudytile_rgb.pth",
+    nc_channels=['red', 'green', 'blue'],
+    band_stats_path="band_stats.json",
+    var_name='cloudy_seq_rgb',
+    output_dir="/path/to/output/files",  # New files written here
 )
 ```
 
@@ -160,6 +170,9 @@ Adds three variables to each lake NC file:
 - `cloudy_seq_bns16` - predictions from B+NIR+SWIR16 model
 
 Input directory: `/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_processed`
+Output directory: `/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_with_cloudyseq`
+
+**Note**: Output is written to a separate directory to preserve original files. The 3 models run sequentially, each adding its variable to the output files.
 
 ### Syncing Wandb Offline Runs
 
@@ -179,7 +192,8 @@ wandb sync wandb/offline-run-20260118_*
 | Repository | `/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile` |
 | Training NC data | `/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc` |
 | Band statistics | `/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json` |
-| Lake NC files | `/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_processed` |
+| Lake NC files (input) | `/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_processed` |
+| Lake NC files (with cloudy_seq) | `/oak/stanford/groups/cyaolai/JoshRines/data/tstacks/CW2019_tstacks_with_cloudyseq` |
 | Sherlock workdir | `/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile` |
 | Saved models | `/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/models` |
 | Logs | `/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs` |
@@ -213,3 +227,5 @@ wandb sync wandb/offline-run-20260118_*
 - Created `train_top3_models.sh` - Train and save top 3 spectral models
 - Created `run_inference_lakes.sh` - Run inference on lake NC files with all 3 models
 - GPU constraint for H100 incompatibility: use `-C GPU_SKU:A100_SXM4` on Sherlock
+- Added `output_dir` parameter to `process_directory()` for writing to separate directory
+- Added progress tracking with timestamps and ETA to inference pipeline

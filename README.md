@@ -38,10 +38,13 @@ cloudy-tile/
 │   ├── preprocessing/
 │   │   └── extract_jpgs.py
 │   ├── training/
-│   │   ├── run_training.py  # Main training script
-│   │   ├── run_training.sh  # SLURM job for single training run
-│   │   ├── run_sweep.sh     # SLURM job for wandb sweeps
-│   │   └── sweep.yaml       # Hyperparameter sweep configuration
+│   │   ├── run_training.py           # Main training script
+│   │   ├── run_spectral_array.sh     # SLURM array job for spectral band sweep
+│   │   ├── train_top3_models.sh      # Train and save top 3 spectral models
+│   │   ├── run_sweep.sh              # SLURM job for wandb sweeps
+│   │   └── sweep.yaml                # Hyperparameter sweep configuration
+│   ├── inference/
+│   │   └── run_inference_lakes.sh    # Run inference on lake NC files
 │   └── labeling/
 │       └── export_labelbox.py
 ├── labels.csv               # Exported labels from Labelbox
@@ -120,19 +123,39 @@ python engine/training/run_training.py \
 ### Inference
 
 ```python
-from cloudytile.inference import predict_from_nc, add_cloudy_seq_to_nc
+from cloudytile.inference import load_model, predict_from_nc, add_cloudy_seq_to_nc, process_directory
+
+# Load a trained model
+model = load_model(
+    weights_path="cloudytile_rgb.pth",
+    img_size=(512, 512),
+    in_channels=3,  # Must match training (3 for RGB, 4 for RGBN, etc.)
+)
 
 # Get predictions for all timesteps in a NetCDF file
 predictions = predict_from_nc(
-    nc_path="tile.nc",
-    weights_path="best_model.pth",
-    threshold=0.5
+    model, ds,
+    nc_channels=['red', 'green', 'blue'],
+    band_stats=band_stats_dict,  # Per-band normalization
 )
 
 # Add cloudy_seq variable to NetCDF for use in lake-vision
 add_cloudy_seq_to_nc(
     nc_path="tile.nc",
-    weights_path="best_model.pth"
+    model=model,
+    nc_channels=['red', 'green', 'blue'],
+    band_stats=band_stats_dict,
+    var_name='cloudy_seq_rgb',  # Custom output variable name
+)
+
+# Process entire directory (batch inference)
+process_directory(
+    nc_dir="/path/to/input/files",
+    model_path="cloudytile_rgb.pth",
+    nc_channels=['red', 'green', 'blue'],
+    band_stats_path="band_stats.json",
+    var_name='cloudy_seq_rgb',
+    output_dir="/path/to/output/files",  # Optional: write to separate directory
 )
 ```
 
@@ -163,10 +186,40 @@ python engine/labeling/export_labelbox.py --task_id <task_id> --output labels.cs
 ## Model Architecture
 
 `CloudyTileCNN` is a simple CNN with configurable architecture:
-- **Input**: RGB images normalized to [0, 1], shape [B, 3, H, W]
+- **Input**: Multi-spectral images, shape [B, C, H, W] where C depends on band configuration
 - **Conv layers**: Configurable channels (default: [16, 32, 64])
 - **FC layers**: Configurable sizes (default: [128])
 - **Output**: Logits (use sigmoid for probabilities)
+
+### Supported Spectral Bands
+
+The model supports various Sentinel-2 band combinations via the `in_channels` parameter:
+- `red`, `green`, `blue` (visible)
+- `nir` (near-infrared)
+- `swir16` (SWIR Band 11, 1.6μm)
+- `swir22` (SWIR Band 12, 2.2μm)
+
+**Top-performing band combinations** (from spectral sweep):
+1. **RGB** (`red,green,blue`) - 3 channels
+2. **RGB+NIR** (`red,green,blue,nir`) - 4 channels
+3. **B+NIR+SWIR16** (`blue,nir,swir16`) - 3 channels
+
+### Band Statistics (Normalization)
+
+For multi-spectral models, per-band mean/std normalization is recommended. The `band_stats.json` file contains precomputed statistics:
+
+```json
+{
+    "red": {"mean": 1234.5, "std": 567.8},
+    "green": {"mean": 1100.2, "std": 498.3},
+    "blue": {"mean": 900.1, "std": 412.5},
+    "nir": {"mean": 2100.3, "std": 890.2},
+    "swir16": {"mean": 1500.7, "std": 650.4},
+    "swir22": {"mean": 800.9, "std": 380.1}
+}
+```
+
+On Sherlock: `/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json`
 
 ## Model Results
 <img src="assets/training.png" alt="Training Metrics" width="480px" />
