@@ -11,9 +11,12 @@ sees them. Those are decidable by rule, so labeling them spends effort on a
 solved subproblem.
 
 Source: the ESSD SDR deposit, /oak/.../data/essd_sdr/data/CW{2018,2019}/, which
-holds 679 + 1000 per-lake files. Its splits/ directory defines lake-level
-train/val/test ID lists — use those at training time rather than splitting
-tiles, which is what leaked lakes across the split in the first place.
+holds 679 + 1000 per-lake files. Only the imagery is shared with that deposit —
+cloudy-tile keeps its own splits, since tile usefulness is a different task from
+drainage class and should not inherit that stratification.
+
+Split by lake_id, never by tile: the previous 80/10/10 tile split put all 52
+test lakes in train as well, so nothing was actually held out.
 
 Usage:
     python extract_label_frames.py \

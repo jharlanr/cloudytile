@@ -29,8 +29,8 @@
 # skip empty frames without reading pixels, and boa_add_offset is applied when
 # converting digital numbers to reflectance.
 #
-# Split at training time using essd_sdr/splits/essd_CW/{train,val,test}_ids.json
-# -- lake-level ID lists, so they cannot leak a lake across the split.
+# Only the imagery is shared with the ESSD deposit; cloudy-tile keeps its own
+# splits. Group them by lake_id, never by tile.
 #
 # AFTER THIS COMPLETES, copy the frames down and label locally — the jpgs are
 # small but the OAK mount reads at well under 1 MB/s, which the GUI will feel:
