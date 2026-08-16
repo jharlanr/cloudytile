@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from cloudytile.data import CloudyTileDataset, CloudyTileDatasetNC, create_splits
 from cloudytile.model import CloudyTileCNN
+from cloudytile.splits import assert_lake_disjoint, create_lake_splits
 from cloudytile.training import train_one_epoch, evaluate
 
 
@@ -96,15 +97,30 @@ def train(config: dict):
 
     print(f"Optimizing for: {opt_metric}")
 
-    # Create data splits
-    train_df, val_df, test_df = create_splits(
-        config["labels_csv"],
+    # Create data splits. 'lake' groups by lake_id so a lake cannot appear in
+    # two splits; 'tile' is the original behavior and leaks near-duplicate
+    # frames of the same lake across the split — kept only to reproduce old runs.
+    split_by = config.get("split_by", "lake")
+    split_kwargs = dict(
         train_ratio=config.get("train_ratio", 0.8),
         val_ratio=config.get("val_ratio", 0.1),
         test_ratio=config.get("test_ratio", 0.1),
         seed=config.get("seed", 42),
         output_dir=config.get("splits_dir"),
     )
+    if split_by == "lake":
+        train_df, val_df, test_df = create_lake_splits(
+            config["labels_csv"], **split_kwargs
+        )
+        assert_lake_disjoint(train_df, val_df, test_df)
+    elif split_by == "tile":
+        print("WARNING: --split_by tile shares lakes across splits; "
+              "test metrics will be optimistic.")
+        train_df, val_df, test_df = create_splits(
+            config["labels_csv"], **split_kwargs
+        )
+    else:
+        raise ValueError(f"--split_by must be 'lake' or 'tile', got {split_by!r}")
 
     # Save splits temporarily for Dataset to read
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -386,6 +402,10 @@ def main():
                         default=False, help="Use learning rate scheduler")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--split_by", type=str, default="lake",
+                        choices=["lake", "tile"],
+                        help="Group splits by lake_id (default) or split "
+                             "individual tiles (legacy; leaks lakes)")
     parser.add_argument("--save_path", type=str, default=None,
                         help="Path to save best model weights")
     parser.add_argument("--optimize_metric", type=str, default="precision",
