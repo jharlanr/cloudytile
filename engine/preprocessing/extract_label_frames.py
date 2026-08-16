@@ -2,9 +2,11 @@
 """
 Sample frames for labeling: N random lakes x K random timesteps, skipping no-data frames.
 
-Produces a lake-diverse labeling set. The previous training set drew ~35 frames
-from each of only 60 lakes, which left too few independent lakes to hold any out
-of a grouped split; sampling few frames from many lakes fixes that.
+Produces a lake-diverse labeling set. The previous training set covered only 60
+lakes, too few to hold any out of a lake-grouped split; spreading the same
+labeling budget over many more lakes fixes that. Timesteps are drawn at random
+across the melt season rather than consecutively, since adjacent frames of one
+lake are near-duplicates.
 
 Frames whose RGB is >= --max_nan_frac no-data are dropped before a human ever
 sees them. Those are decidable by rule, so labeling them spends effort on a
@@ -262,10 +264,10 @@ def main():
                    help="Directory of lake timestack .nc files")
     p.add_argument("--output_dir", type=str, required=True,
                    help="Directory to write JPG frames into")
-    p.add_argument("--n_lakes", type=int, default=500,
-                   help="Number of lakes to sample (default: 500)")
-    p.add_argument("--frames_per_lake", type=int, default=10,
-                   help="Frames to draw per lake (default: 10)")
+    p.add_argument("--n_lakes", type=int, default=200,
+                   help="Number of lakes to sample (default: 200)")
+    p.add_argument("--frames_per_lake", type=int, default=25,
+                   help="Frames to draw per lake (default: 25)")
     p.add_argument("--max_nan_frac", type=float, default=0.5,
                    help="Reject frames with >= this fraction of no-data RGB (default: 0.5)")
     p.add_argument("--seed", type=int, default=42)

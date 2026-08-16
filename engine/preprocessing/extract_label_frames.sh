@@ -13,10 +13,12 @@
 #SBATCH --mail-user=jrines@stanford.edu
 
 # =============================================================================
-# SAMPLE LABELING FRAMES: 500 lakes x 10 frames, per year
+# SAMPLE LABELING FRAMES: 200 lakes x 25 frames, per year
 # =============================================================================
 #
 # Array task 0 -> 2019, task 1 -> 2018. 5,000 frames each, ~0.5 GB total.
+# Lakes carry ~90 usable timesteps each, so 25 is drawn comfortably within
+# supply; every lake in a 40-lake sample cleared 40 usable frames.
 #
 # USAGE:
 #   sbatch extract_label_frames.sh
@@ -56,8 +58,8 @@ YEAR="${YEARS[$SLURM_ARRAY_TASK_ID]}"
 NC_DIR="${NC_DIRS[$SLURM_ARRAY_TASK_ID]}"
 OUTPUT_DIR="$OUT_BASE/label_frames_${YEAR}"
 
-N_LAKES=500
-FRAMES_PER_LAKE=10
+N_LAKES=200
+FRAMES_PER_LAKE=25
 MAX_NAN_FRAC=0.5
 # Sentinel-2 L2A true-color convention; see the .py docstring on bright-scene saturation
 IMAGERY_SCALE=10000
