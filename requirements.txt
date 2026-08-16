@@ -1,0 +1,17 @@
+# labeling GUI (engine/labeling/label_gui.py)
+flask
+
+# core package (cloudytile/): data, model, training, inference, preprocessing
+numpy
+pandas
+pillow
+scikit-learn
+torch
+torchvision
+xarray
+
+# tests
+pytest
+
+# engine/labeling/export_labelbox.py (legacy workflow, kept as a record)
+# additionally needs `labelbox`; deliberately not listed here.
