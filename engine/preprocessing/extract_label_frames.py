@@ -10,9 +10,14 @@ Frames whose RGB is >= --max_nan_frac no-data are dropped before a human ever
 sees them. Those are decidable by rule, so labeling them spends effort on a
 solved subproblem.
 
+Source: the ESSD SDR deposit, /oak/.../data/essd_sdr/data/CW{2018,2019}/, which
+holds 679 + 1000 per-lake files. Its splits/ directory defines lake-level
+train/val/test ID lists — use those at training time rather than splitting
+tiles, which is what leaked lakes across the split in the first place.
+
 Usage:
     python extract_label_frames.py \
-        --nc_dir /oak/.../data/tstacks/CW2019_tstacks \
+        --nc_dir /oak/.../data/essd_sdr/data/CW2019 \
         --output_dir /oak/.../data/cloudytile/label_frames_2019 \
         --n_lakes 500 --frames_per_lake 10
 
@@ -23,16 +28,15 @@ Output:
     {output_dir}/{lake_id}_t{timestep:03d}.jpg    matches labels.csv's filename key
     {output_dir}/manifest.csv                     provenance + per-frame metadata
 
-Note on --imagery_scale: 10000 is the Sentinel-2 L2A convention (BOA reflectance
-is stored as integers x10000), so the default render is true color.
+Note on --imagery_scale: 10000 is the Sentinel-2 quantification value, so the
+default render is true color. Confirmed against the SDR data: on a clear CW2019
+frame the median converts to 0.965 reflectance and the max to 1.09, i.e.
+Greenland ice genuinely sits just below 1.0 and only a thin tail exceeds it.
 
-Be aware that bright early-season scenes saturate at this scale: on a sampled
-CW2018 frame from May 20, the median reflectance was 9928 and 38% of pixels
-rendered as pure white. Much of that is reflectance above 1.0, which is BRDF /
-sensor artifact rather than physical surface reflectance, so clipping it is
-defensible. Raising the scale (e.g. 14000) removes the saturation but renders a
-non-physical range; it is worth doing only if blown-out frames turn out to make
-thin cloud over ice hard to call by eye.
+Bright early-season scenes still push against the top of the 8-bit range. Raising
+the scale would recover that headroom but renders a non-physical reflectance
+range, so it is worth doing only if blown-out frames turn out to make thin cloud
+over ice hard to call by eye.
 
 This only affects what the human labeler sees. Training through
 CloudyTileDatasetNC reads float reflectance from the .nc directly and is
@@ -72,8 +76,8 @@ def resolve_rgb(ds: xr.Dataset) -> tuple[str, list[int]]:
 
     if "reflectance" in ds.data_vars:
         names = None
-        if "common_name" in ds.coords:
-            names = [str(c) for c in ds.coords["common_name"].values]
+        if "common_name" in ds.coords or "common_name" in ds.variables:
+            names = [str(c) for c in ds["common_name"].values]
         elif "band" in ds.attrs:
             # attrs['band'] is Sentinel-2 IDs: B04=red, B03=green, B02=blue
             s2 = {"B04": "red", "B03": "green", "B02": "blue"}
@@ -103,20 +107,36 @@ def candidate_timesteps(ds: xr.Dataset, max_nan_frac: float) -> list[int]:
     certainly-empty frames, and every survivor is verified against its real RGB.
     """
     n_time = ds.sizes["time"]
-    if "pct_nans" in ds.coords and ds.coords["pct_nans"].dims == ("time",):
-        pct = np.asarray(ds.coords["pct_nans"].values, dtype=float)
-        return [t for t in range(n_time) if not (pct[t] >= 99.0)]
+    if "pct_nans" in ds.variables and ds["pct_nans"].dims == ("time",):
+        pct = np.asarray(ds["pct_nans"].values, dtype=float)
+        # NaN pct_nans marks a timestep with no acquisition at all.
+        return [t for t in range(n_time)
+                if np.isfinite(pct[t]) and pct[t] < 100.0 * max_nan_frac]
     return list(range(n_time))
 
 
 def frame_rgb_and_nan(ds: xr.Dataset, var: str, idx: list[int], t: int, scale: float):
-    """Load one timestep's RGB. Returns (uint8 [H,W,3], nan_fraction)."""
+    """
+    Load one timestep's RGB. Returns (uint8 [H,W,3], nan_fraction).
+
+    The SDR product stores raw L2A digital numbers, not reflectance:
+    surface_reflectance = (DN + boa_add_offset) / 10000, with boa_add_offset
+    supplied per timestep. It is 0 across the 2018/2019 scenes checked (they
+    predate ESA processing baseline 04.00, which introduced a -1000 offset), but
+    it is applied here rather than assumed so rescenes do not silently shift the
+    render by 0.1 reflectance.
+    """
     arr = ds[var].isel(time=t).isel({ds[var].dims[1]: idx}).values.astype(np.float32)
 
     # a pixel is unusable if any RGB band is missing there
     nan_frac = float(np.isnan(arr).any(axis=0).mean())
 
-    rgb = np.clip(np.nan_to_num(arr, nan=0.0) / scale, 0.0, 1.0)
+    offset = 0.0
+    if "boa_add_offset" in ds.variables and ds["boa_add_offset"].dims == ("time",):
+        raw = float(ds["boa_add_offset"].isel(time=t).values)
+        offset = raw if np.isfinite(raw) else 0.0
+
+    rgb = np.clip((np.nan_to_num(arr, nan=0.0) + offset) / scale, 0.0, 1.0)
     rgb = (np.transpose(rgb, (1, 2, 0)) * 255).astype(np.uint8)
     return rgb, nan_frac
 

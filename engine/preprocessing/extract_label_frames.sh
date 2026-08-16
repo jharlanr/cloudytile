@@ -24,10 +24,13 @@
 # Sanity check the counts first without reading imagery:
 #   python3 extract_label_frames.py --nc_dir <dir> --output_dir <dir> --dry_run
 #
-# Both years use the RAW tstacks: they share one schema and carry the
-# per-timestep pct_nans coordinate that lets the script skip empty frames
-# without reading pixels. The processed 2019 files are derived from these
-# (see their source_imagery attribute), so the rendered RGB is identical.
+# Imagery comes from the ESSD SDR deposit (679 CW2018 + 1000 CW2019 per-lake
+# files, one schema for both years). Its per-timestep pct_nans lets the script
+# skip empty frames without reading pixels, and boa_add_offset is applied when
+# converting digital numbers to reflectance.
+#
+# Split at training time using essd_sdr/splits/essd_CW/{train,val,test}_ids.json
+# -- lake-level ID lists, so they cannot leak a lake across the split.
 #
 # AFTER THIS COMPLETES, copy the frames down and label locally — the jpgs are
 # small but the OAK mount reads at well under 1 MB/s, which the GUI will feel:
@@ -43,11 +46,11 @@ ml py-scipy/1.12.0_py312
 pip install --user xarray netcdf4
 
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
-TSTACK_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/tstacks"
+SDR_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/essd_sdr/data"
 OUT_BASE="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile"
 
 YEARS=(2019 2018)
-NC_DIRS=("$TSTACK_DIR/CW2019_tstacks" "$TSTACK_DIR/CW2018_tstacks")
+NC_DIRS=("$SDR_DIR/CW2019" "$SDR_DIR/CW2018")
 
 YEAR="${YEARS[$SLURM_ARRAY_TASK_ID]}"
 NC_DIR="${NC_DIRS[$SLURM_ARRAY_TASK_ID]}"
