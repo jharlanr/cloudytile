@@ -23,14 +23,20 @@ Output:
     {output_dir}/{lake_id}_t{timestep:03d}.jpg    matches labels.csv's filename key
     {output_dir}/manifest.csv                     provenance + per-frame metadata
 
-Note on --imagery_scale: this defaults to 14000, NOT the 10000 used elsewhere in
-the repo. Greenland ice is bright enough that 10000 clips it — on a sampled
-CW2018 frame the median reflectance was 9928, i.e. half the scene sat at the top
-of the 8-bit range, and 38% of pixels blew out to pure white. That destroys
-contrast in precisely the bright region where thin cloud over ice has to be
-judged. 14000 cleared all clipping on the frames tested (p99 was 11648).
-Frames rendered here are therefore NOT visually comparable to the older
-jpg_tiles set, which was rendered at 10000.
+Note on --imagery_scale: 10000 is the Sentinel-2 L2A convention (BOA reflectance
+is stored as integers x10000), so the default render is true color.
+
+Be aware that bright early-season scenes saturate at this scale: on a sampled
+CW2018 frame from May 20, the median reflectance was 9928 and 38% of pixels
+rendered as pure white. Much of that is reflectance above 1.0, which is BRDF /
+sensor artifact rather than physical surface reflectance, so clipping it is
+defensible. Raising the scale (e.g. 14000) removes the saturation but renders a
+non-physical range; it is worth doing only if blown-out frames turn out to make
+thin cloud over ice hard to call by eye.
+
+This only affects what the human labeler sees. Training through
+CloudyTileDatasetNC reads float reflectance from the .nc directly and is
+unaffected by the JPG render.
 """
 import argparse
 import random
@@ -240,9 +246,9 @@ def main():
     p.add_argument("--max_nan_frac", type=float, default=0.5,
                    help="Reject frames with >= this fraction of no-data RGB (default: 0.5)")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--imagery_scale", type=float, default=14000.0,
-                   help="Reflectance scale for the 8-bit render (default: 14000.0; see "
-                        "module docstring — 10000.0 clips bright ice to pure white)")
+    p.add_argument("--imagery_scale", type=float, default=10000.0,
+                   help="Reflectance scale for the 8-bit render (default: 10000.0, the "
+                        "Sentinel-2 L2A true-color convention)")
     p.add_argument("--quality", type=int, default=95, help="JPG quality (default: 95)")
     p.add_argument("--manifest", type=str, default=None,
                    help="Manifest CSV path (default: <output_dir>/manifest.csv)")

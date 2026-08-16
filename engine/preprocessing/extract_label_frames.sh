@@ -56,8 +56,8 @@ OUTPUT_DIR="$OUT_BASE/label_frames_${YEAR}"
 N_LAKES=500
 FRAMES_PER_LAKE=10
 MAX_NAN_FRAC=0.5
-# 10000 (used elsewhere in the repo) clips bright ice to white; see the .py docstring
-IMAGERY_SCALE=14000
+# Sentinel-2 L2A true-color convention; see the .py docstring on bright-scene saturation
+IMAGERY_SCALE=10000
 
 mkdir -p "$OUTPUT_DIR"
 mkdir -p /oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs
