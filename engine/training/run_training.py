@@ -227,6 +227,8 @@ def train(config: dict):
         # Training loop
         # For loss, lower is better; for other metrics, higher is better
         best_metric_value = float("inf") if opt_metric == "loss" else 0.0
+        best_state = None
+        best_epoch = None
         epochs = config.get("epochs", 20)
 
         for epoch in range(epochs):
@@ -272,9 +274,25 @@ def train(config: dict):
 
             if is_better:
                 best_metric_value = current_metric
+                best_epoch = epoch + 1
+                # Held on CPU so the test evaluation below scores these weights
+                # rather than whatever the last epoch happened to land on.
+                best_state = {k: v.detach().cpu().clone()
+                              for k, v in model.state_dict().items()}
                 if config.get("save_path"):
-                    torch.save(model.state_dict(), config["save_path"])
+                    torch.save(best_state, config["save_path"])
                     print(f"  Saved best model ({opt_metric}={current_metric:.4f})")
+
+        # Restore the best checkpoint before testing. Without this the reported
+        # test metrics describe the final epoch while the saved .pth holds the
+        # best-validation epoch, so the numbers never described the weights.
+        if best_state is not None:
+            model.load_state_dict(best_state)
+            print(f"\nRestored best checkpoint (epoch {best_epoch}, "
+                  f"{opt_metric}={best_metric_value:.4f}) for test evaluation")
+        else:
+            print("\nWARNING: no epoch improved on the initial value; "
+                  "testing final-epoch weights")
 
         # Final test evaluation
         test_df.to_csv(tmpdir / "test.csv", index=False)
@@ -318,6 +336,7 @@ def train(config: dict):
                 "test_auc": test_metrics["auc"],
             })
             wandb.summary[f"best_val_{opt_metric}"] = best_metric_value
+            wandb.summary["best_epoch"] = best_epoch
             wandb.summary["test_acc"] = test_metrics["accuracy"]
             wandb.summary["test_precision"] = test_metrics["precision"]
             wandb.summary["test_f1"] = test_metrics["f1"]
