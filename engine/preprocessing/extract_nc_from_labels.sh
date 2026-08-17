@@ -42,7 +42,7 @@ export PYTHONUNBUFFERED=1
 # =============================================================================
 
 # Path to your existing labels CSV (with 'filename' and 'label' columns)
-LABELS_CSV="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile/labels.csv"
+LABELS_CSV="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile/labels/labels.csv"
 
 # Directory containing processed lake .nc files (from lake-vision preprocessing)
 # These should have spectral bands: red, green, blue, nir, swir16, swir22, mask

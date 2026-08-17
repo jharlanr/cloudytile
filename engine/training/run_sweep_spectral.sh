@@ -83,7 +83,7 @@ pip install --user xarray netcdf4
 # Set paths
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
 SHERLOCK_DIR="/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile"
-LABELS_CSV="$REPO_DIR/labels.csv"
+LABELS_CSV="$REPO_DIR/labels/labels.csv"
 IMAGE_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/jpg_tiles"
 NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc"
 
