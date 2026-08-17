@@ -3,7 +3,7 @@ Lake-grouped train/val/test splitting.
 
 Tiles from one lake at nearby timesteps are near-duplicate scenes, so splitting
 at the tile level leaks a lake across the split: with the original 80/10/10
-tile split on the 2,090-row labels.csv, all 52 test lakes also appeared in
+tile split on the 2,090-row labels_deprecated.csv, all 52 test lakes appeared in
 train and nothing was genuinely held out. Every function here splits on
 lake_id, so a lake lands wholly inside one split.
 

@@ -47,7 +47,9 @@ cloudy-tile/
 │   │   └── run_inference_lakes.sh    # Run inference on lake NC files
 │   └── labeling/
 │       └── export_labelbox.py
-├── labels.csv               # Exported labels from Labelbox
+├── labels/
+│   ├── labels.csv           # Current labeling campaign (SDR frames)
+│   └── labels_deprecated.csv  # Retired Labelbox export (old jpg_tiles)
 └── assets/                  # Documentation images
 ```
 
@@ -75,7 +77,7 @@ pip install -e .
 **Local training:**
 ```bash
 python engine/training/run_training.py \
-    --labels_csv labels.csv \
+    --labels_csv labels/labels.csv \
     --image_dir /path/to/jpg_tiles \
     --epochs 30 \
     --batch_size 32 \
@@ -177,10 +179,10 @@ extract_frames_from_directory(
 Labels are exported from Labelbox:
 ```bash
 export LABELBOX_API_KEY="your_key"
-python engine/labeling/export_labelbox.py --output labels.csv
+python engine/labeling/export_labelbox.py --output labels/labels_deprecated.csv
 
 # Reuse existing export task (faster):
-python engine/labeling/export_labelbox.py --task_id <task_id> --output labels.csv
+python engine/labeling/export_labelbox.py --task_id <task_id> --output labels/labels_deprecated.csv
 ```
 
 ## Model Architecture

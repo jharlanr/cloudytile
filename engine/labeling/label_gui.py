@@ -95,11 +95,11 @@ def parse_args(argv=None):
     parser.add_argument(
         "--labels_csv",
         type=str,
-        default="labels/labels_v2.csv",
-        help="Labels CSV to resume from and write to "
-             "(default: labels/labels_v2.csv). Deliberately not "
-             "labels/labels.csv — that holds the older Labelbox campaign over "
-             "a different frame set, and the two must not be merged.",
+        default="labels/labels.csv",
+        help="Labels CSV to resume from and write to (default: "
+             "labels/labels.csv). Note labels/labels_deprecated.csv is the "
+             "retired Labelbox campaign over a different frame set; the two "
+             "must not be merged.",
     )
     parser.add_argument("--port", type=int, default=5050)
     parser.add_argument(
