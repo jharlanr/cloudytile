@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cloudy-tile: how it works</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #666;
+    --line: #d8d8d8; --card: #f6f6f6;
+    --accent: #2563eb; --danger: #dc2626; --good: #059669;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212; --fg: #e8e8e8; --muted: #9a9a9a;
+      --line: #3a3a3a; --card: #1d1d1d;
+      --accent: #60a5fa; --danger: #f87171; --good: #34d399;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; padding: 2rem 1.2rem 5rem; max-width: 60rem;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 .2rem; }
+  h2 { font-size: 1.25rem; margin: 2.6rem 0 .6rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+  h3 { font-size: 1.02rem; margin: 1.6rem 0 .4rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; }
+  p { margin: .6rem 0; }
+  code, pre {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em;
+    background: var(--card); border-radius: 4px;
+  }
+  code { padding: .1em .35em; }
+  pre { padding: .8rem 1rem; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; margin: .8rem 0; font-size: .92em; }
+  th, td { border: 1px solid var(--line); padding: .35rem .7rem; text-align: left; }
+  th { background: var(--card); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  figure { margin: 1.4rem 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption { color: var(--muted); font-size: .88em; margin-top: .5rem; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--card);
+    padding: .6rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0;
+  }
+  .danger-text { color: var(--danger); font-weight: 600; }
+  .good-text { color: var(--good); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>cloudy-tile: how it works</h1>
+<p class="subtitle">A newcomer's guide to the repo, the data, and the network. Last updated August 2026.</p>
+
+<h2>1. The problem</h2>
+<p>
+Downstream of this repo, the <strong>lake-vision</strong> classifier watches supraglacial lakes
+on the Greenland ice sheet through a melt season of Sentinel-2 imagery and decides how each lake
+drained. Many timesteps in that record are worthless &mdash; the tile is under cloud, or the
+satellite swath missed it entirely. Feeding those frames to lake-vision degrades it, so each
+frame must first be screened: <em>is this tile usable or not?</em>
+</p>
+<p>
+The obvious answer &mdash; use Sentinel-2's own per-pixel cloud mask &mdash; does not work here.
+Cloud masks are notoriously unreliable over bright ice: fresh snow and cloud look alike to the
+detector. In our 2019 labels, scenes a human rejected actually carried <em>lower</em> reported
+cloud cover than scenes they kept. That failure is the reason this repo exists.
+</p>
+<p>
+<code>cloudy-tile</code> trains a small CNN, <code>CloudyTileCNN</code>, to make the call a human
+makes in half a second: <strong>1 = useful</strong> (clear enough to read the lake, even through
+thin cloud), <strong>0 = not useful</strong> (cloud-obscured or mostly missing data). Its
+per-timestep predictions are written into each lake's NetCDF as <code>cloudy_seq_rgb</code>,
+which lake-vision uses as its usability filter.
+</p>
+<div class="callout">
+A tile with visible thin cloud can still be <strong>useful</strong>: if the lake's extent reads
+through the haze, it carries information. The label is about usability, not about the mere
+presence of cloud. This judgment call &mdash; thin cloud over bright ice &mdash; is the hard part
+of the task, for humans and for the model.
+</div>
+
+<h2>2. The pipeline</h2>
+<figure>
+<svg viewBox="0 0 1120 150" role="img" aria-label="Pipeline: SDR NetCDF timestacks are sampled into JPG frames, labeled in the browser GUI into labels.csv, used to train CloudyTileCNN weights, which produce cloudy_seq_rgb consumed by lake-vision.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g fill="none" stroke="currentColor" stroke-width="1.3">
+    <rect x="10"  y="45" width="150" height="58" rx="8"/>
+    <rect x="204" y="45" width="150" height="58" rx="8"/>
+    <rect x="398" y="45" width="150" height="58" rx="8"/>
+    <rect x="592" y="45" width="150" height="58" rx="8"/>
+    <rect x="786" y="45" width="150" height="58" rx="8"/>
+    <rect x="980" y="45" width="130" height="58" rx="8" stroke="var(--accent)"/>
+  </g>
+  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr)">
+    <line x1="160" y1="74" x2="200" y2="74"/>
+    <line x1="354" y1="74" x2="394" y2="74"/>
+    <line x1="548" y1="74" x2="588" y2="74"/>
+    <line x1="742" y1="74" x2="782" y2="74"/>
+    <line x1="936" y1="74" x2="976" y2="74"/>
+  </g>
+  <g font-size="12.5" fill="currentColor" text-anchor="middle">
+    <text x="85"  y="70">ESSD SDR</text><text x="85"  y="88">.nc timestacks</text>
+    <text x="279" y="70">10,000 JPG</text><text x="279" y="88">frames</text>
+    <text x="473" y="70">labels/</text><text x="473" y="88">labels.csv</text>
+    <text x="667" y="70">CloudyTileCNN</text><text x="667" y="88">weights .pth</text>
+    <text x="861" y="70">cloudy_seq_rgb</text><text x="861" y="88">0/1 per timestep</text>
+    <text x="1045" y="70" fill="var(--accent)">lake-vision</text><text x="1045" y="88" fill="var(--accent)">drainage clf</text>
+  </g>
+  <g font-size="10.5" fill="currentColor" opacity="0.75" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">
+    <text x="180" y="36">extract_label_</text><text x="180" y="48" transform="translate(0,-14)"></text>
+    <text x="180" y="122">frames.py</text>
+    <text x="374" y="36">label_gui.py</text>
+    <text x="568" y="36">run_training.py</text>
+    <text x="762" y="36">inference.py</text>
+    <text x="956" y="36">consumed by</text>
+  </g>
+</svg>
+<figcaption>The full path from raw imagery to lake-vision. Everything left of the weights is
+data preparation done once per labeling campaign; everything right of it runs over the full
+2018&ndash;2019 CW lake archive.</figcaption>
+</figure>
+
+<p>Source imagery is the published <strong>ESSD SDR deposit</strong> on OAK
+(<code>data/essd_sdr/data/CW{2018,2019}/</code>: 679 + 1,000 per-lake NetCDF files, 153 daily
+timesteps each, six Sentinel-2 bands as raw L2A digital numbers). Only the imagery is shared with
+the ESSD work &mdash; cloudy-tile keeps its own labels and its own splits.</p>
+
+<h2>3. Data contracts</h2>
+<p>Two conventions hold the pipeline together. Break either and things fail silently.</p>
+<table>
+<tr><th>contract</th><th>form</th><th>example</th></tr>
+<tr><td>frame filename</td><td><code>{lake_id}_t{timestep:03d}.jpg</code></td><td><code>CW2019_1530_t006.jpg</code></td></tr>
+<tr><td>labels CSV</td><td>columns <code>filename,label</code>; filename unique</td><td><code>CW2019_1530_t006.jpg,0</code></td></tr>
+</table>
+<p>
+The polarity is load-bearing: <strong>0 = not useful, 1 = useful</strong>. It matches
+<code>CloudyTileDataset</code>'s docstring and the <code>cloudy_seq</code> attributes written at
+inference. The lake id is recoverable from any filename by splitting on the final
+<code>_t</code> &mdash; that single fact is what makes lake-grouped splitting possible.
+</p>
+
+<h3>The current dataset (August 2026)</h3>
+<table>
+<tr><th></th><th>frames</th><th>lakes</th><th>not useful</th><th>useful</th></tr>
+<tr><td>CW2019</td><td class="num">5,000</td><td class="num">200</td><td class="num">23.8%</td><td class="num">76.2%</td></tr>
+<tr><td>CW2018</td><td class="num">5,000</td><td class="num">200</td><td class="num">39.0%</td><td class="num">61.0%</td></tr>
+<tr><td><strong>total</strong></td><td class="num"><strong>10,000</strong></td><td class="num"><strong>400</strong></td><td class="num"><strong>31.4%</strong></td><td class="num"><strong>68.6%</strong></td></tr>
+</table>
+<p>
+25 frames per lake, drawn at random across the May&ndash;September melt season, keeping only
+frames whose RGB is &lt;50% no-data (<code>extract_label_frames.py</code>). 2018 was a much
+cloudier season than 2019, which is why its negative rate is higher &mdash; and why the combined
+set is better balanced than either year alone. Every one of the 400 lakes contains both classes.
+An earlier 2,090-frame Labelbox campaign over just 60 lakes is retired in
+<code>labels/labels_deprecated.csv</code>; it must never be merged with the current file, since
+it labels a different frame population.
+</p>
+
+<h2>4. Splitting: always by lake, never by tile</h2>
+<p>
+Two frames of the same lake a few days apart are near-duplicate images. A split drawn at the
+<em>tile</em> level therefore puts almost every lake on both sides of the line: the model meets
+the test lakes during training and the test score measures recognition, not generalization. This
+is not hypothetical &mdash; the original tile split of the deprecated dataset put
+<strong>all 52 test lakes in the training set too</strong>.
+</p>
+<figure>
+<svg viewBox="0 0 900 250" role="img" aria-label="Left: splitting by tile scatters each lake's frames across train and test, so every lake leaks. Right: splitting by lake assigns each lake wholly to one side.">
+  <g font-size="13" fill="currentColor">
+    <text x="110" y="22">split by tile &mdash; leaks</text>
+    <text x="560" y="22">split by lake &mdash; honest</text>
+  </g>
+  <!-- left panel: mixed squares within each lake -->
+  <g fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.85">
+    <rect x="20" y="40"  width="390" height="48" rx="8"/>
+    <rect x="20" y="100" width="390" height="48" rx="8"/>
+    <rect x="20" y="160" width="390" height="48" rx="8"/>
+  </g>
+  <g font-size="11.5" fill="currentColor" opacity="0.8">
+    <text x="30" y="69">lake A</text><text x="30" y="129">lake B</text><text x="30" y="189">lake C</text>
+  </g>
+  <!-- rows of frames: gray=train, accent=test -->
+  <g>
+    <g transform="translate(95,52)">
+      <rect width="22" height="22" x="0"   fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="38"  fill="var(--accent)"/>
+      <rect width="22" height="22" x="76"  fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="114" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="152" fill="var(--accent)"/>
+      <rect width="22" height="22" x="190" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="228" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="266" fill="var(--accent)"/>
+    </g>
+    <g transform="translate(95,112)">
+      <rect width="22" height="22" x="0"   fill="var(--accent)"/>
+      <rect width="22" height="22" x="38"  fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="76"  fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="114" fill="var(--accent)"/>
+      <rect width="22" height="22" x="152" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="190" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="228" fill="var(--accent)"/>
+      <rect width="22" height="22" x="266" fill="currentColor" opacity="0.28"/>
+    </g>
+    <g transform="translate(95,172)">
+      <rect width="22" height="22" x="0"   fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="38"  fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="76"  fill="var(--accent)"/>
+      <rect width="22" height="22" x="114" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="152" fill="var(--accent)"/>
+      <rect width="22" height="22" x="190" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="228" fill="currentColor" opacity="0.28"/>
+      <rect width="22" height="22" x="266" fill="currentColor" opacity="0.28"/>
+    </g>
+  </g>
+  <!-- right panel: whole lakes one color -->
+  <g fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.85">
+    <rect x="470" y="40"  width="390" height="48" rx="8"/>
+    <rect x="470" y="160" width="390" height="48" rx="8"/>
+  </g>
+  <rect x="470" y="100" width="390" height="48" rx="8" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+  <g font-size="11.5" fill="currentColor" opacity="0.8">
+    <text x="480" y="69">lake A</text><text x="480" y="189">lake C</text>
+  </g>
+  <text x="480" y="129" font-size="11.5" fill="var(--accent)">lake B</text>
+  <g transform="translate(545,52)" fill="currentColor" opacity="0.28">
+    <rect width="22" height="22" x="0"/><rect width="22" height="22" x="38"/><rect width="22" height="22" x="76"/><rect width="22" height="22" x="114"/><rect width="22" height="22" x="152"/><rect width="22" height="22" x="190"/><rect width="22" height="22" x="228"/><rect width="22" height="22" x="266"/>
+  </g>
+  <g transform="translate(545,112)" fill="var(--accent)">
+    <rect width="22" height="22" x="0"/><rect width="22" height="22" x="38"/><rect width="22" height="22" x="76"/><rect width="22" height="22" x="114"/><rect width="22" height="22" x="152"/><rect width="22" height="22" x="190"/><rect width="22" height="22" x="228"/><rect width="22" height="22" x="266"/>
+  </g>
+  <g transform="translate(545,172)" fill="currentColor" opacity="0.28">
+    <rect width="22" height="22" x="0"/><rect width="22" height="22" x="38"/><rect width="22" height="22" x="76"/><rect width="22" height="22" x="114"/><rect width="22" height="22" x="152"/><rect width="22" height="22" x="190"/><rect width="22" height="22" x="228"/><rect width="22" height="22" x="266"/>
+  </g>
+  <!-- legend -->
+  <g transform="translate(20,228)" font-size="11.5" fill="currentColor">
+    <rect width="14" height="14" y="-11" fill="currentColor" opacity="0.28"/>
+    <text x="20">train frame</text>
+    <rect width="14" height="14" x="110" y="-11" fill="var(--accent)"/>
+    <text x="130">test frame</text>
+  </g>
+</svg>
+<figcaption>Each row is one lake; each square one frame. Left: a tile-level split scatters every
+lake across both sets &mdash; the model has seen every test lake. Right: a lake-level split holds
+out whole lakes, so test frames come from lakes the model has never seen.</figcaption>
+</figure>
+<p>
+<code>cloudytile/splits.py</code> implements this: <code>create_lake_splits</code> for a single
+80/10/10 partition (320/40/40 lakes on the current data), <code>lake_group_kfold</code> for
+stratified 5-fold CV (80 held-out lakes per fold), and <code>assert_lake_disjoint</code> as a
+guard. <code>run_training.py</code> defaults to <code>--split_by lake</code>; the legacy
+<code>--split_by tile</code> survives only to reproduce old runs, and warns.
+</p>
+
+<h2>5. The network</h2>
+<p>
+<code>CloudyTileCNN</code> (<code>cloudytile/model.py</code>) is a deliberately small CNN: three
+conv blocks, each <em>conv 3&times;3 &rarr; ReLU &rarr; maxpool /2</em>, followed by a
+fully-connected head. Input is an RGB frame resized to 512&times;512, values scaled to [0,1];
+output is a single logit (sigmoid &rarr; probability of "useful").
+</p>
+<figure>
+<svg viewBox="0 0 1120 250" role="img" aria-label="Tensor shapes through the network: 3 by 512 by 512 input shrinks through three conv-pool blocks to 64 by 64 by 64, is flattened to 262,144 values, then a dense layer maps to 128 and to a single logit. The dense layer after flatten holds 33.5 million of the 33.6 million parameters.">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <!-- feature-map boxes, heights shrinking with spatial size -->
+  <g fill="none" stroke="currentColor" stroke-width="1.3">
+    <rect x="20"  y="55"  width="80" height="140" rx="6"/>
+    <rect x="230" y="75"  width="80" height="110" rx="6"/>
+    <rect x="440" y="90"  width="80" height="85"  rx="6"/>
+    <rect x="650" y="102" width="80" height="62"  rx="6"/>
+  </g>
+  <rect x="830" y="45" width="20" height="160" rx="4" fill="none" stroke="var(--danger)" stroke-width="1.6"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.3">
+    <rect x="950" y="105" width="58" height="46" rx="6"/>
+  </g>
+  <circle cx="1078" cy="128" r="20" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <!-- arrows with op labels -->
+  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr2)">
+    <line x1="100" y1="125" x2="226" y2="125"/>
+    <line x1="310" y1="125" x2="436" y2="125"/>
+    <line x1="520" y1="125" x2="646" y2="125"/>
+    <line x1="730" y1="125" x2="826" y2="125"/>
+    <line x1="850" y1="125" x2="946" y2="125"/>
+    <line x1="1008" y1="128" x2="1054" y2="128"/>
+  </g>
+  <g font-size="11" fill="currentColor" opacity="0.8" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">
+    <text x="163" y="112">conv&rarr;pool</text>
+    <text x="373" y="112">conv&rarr;pool</text>
+    <text x="583" y="112">conv&rarr;pool</text>
+    <text x="778" y="112">flatten</text>
+    <text x="898" y="112">Linear</text>
+  </g>
+  <!-- shape labels -->
+  <g font-size="12.5" fill="currentColor" text-anchor="middle">
+    <text x="60"  y="215">3&times;512&times;512</text>
+    <text x="270" y="215">16&times;256&times;256</text>
+    <text x="480" y="215">32&times;128&times;128</text>
+    <text x="690" y="215">64&times;64&times;64</text>
+    <text x="840" y="228">262,144</text>
+    <text x="979" y="132">128</text>
+    <text x="1078" y="132">1</text>
+  </g>
+  <!-- parameter counts -->
+  <g font-size="11" text-anchor="middle" fill="currentColor" opacity="0.75">
+    <text x="163" y="146">448 params</text>
+    <text x="373" y="146">4,640</text>
+    <text x="583" y="146">18,496</text>
+    <text x="1078" y="165">129</text>
+  </g>
+  <text x="898" y="150" font-size="11.5" text-anchor="middle" fill="var(--danger)" font-weight="600">33,554,560</text>
+  <text x="60" y="40" font-size="12.5" fill="currentColor">input RGB</text>
+  <text x="840" y="35" font-size="11.5" text-anchor="middle" fill="var(--danger)">flattened vector</text>
+</svg>
+<figcaption>Tensor shapes through <code>CloudyTileCNN</code> at 512&times;512, RGB, default
+channels [16,&thinsp;32,&thinsp;64], fc [128]. Parameter counts sit under the operation that owns
+them. One dense layer &mdash; <span class="danger-text">262,144&thinsp;&times;&thinsp;128</span>
+&mdash; holds 99.6% of all weights.</figcaption>
+</figure>
+
+<h3>Where the 33.5 million parameters come from</h3>
+<p>
+The conv stack is tiny (&asymp;23.6k weights). The explosion happens at the boundary between
+convolution and the head. After three pool halvings, the feature block is
+64&thinsp;&times;&thinsp;64&thinsp;&times;&thinsp;64 = 262,144 numbers &mdash; and
+<code>Flatten &rarr; Linear(262144, 128)</code> connects every one of them to every one of 128
+neurons:
+</p>
+<table>
+<tr><th>layer</th><th>parameters</th><th>share</th></tr>
+<tr><td>conv 3&rarr;16</td><td class="num">448</td><td class="num">&lt;0.01%</td></tr>
+<tr><td>conv 16&rarr;32</td><td class="num">4,640</td><td class="num">0.01%</td></tr>
+<tr><td>conv 32&rarr;64</td><td class="num">18,496</td><td class="num">0.06%</td></tr>
+<tr><td><span class="danger-text">Linear 262,144&rarr;128</span></td><td class="num"><span class="danger-text">33,554,560</span></td><td class="num"><span class="danger-text">99.93%</span></td></tr>
+<tr><td>Linear 128&rarr;1</td><td class="num">129</td><td class="num">&lt;0.01%</td></tr>
+<tr><td><strong>total</strong></td><td class="num"><strong>33,578,273</strong></td><td></td></tr>
+</table>
+<p>
+Nobody chose a 33M-parameter model; the dense layer silently inherited the full image area,
+because a flatten head scales with <em>resolution</em>, not with design intent. Fit to ~8,000
+training frames, that is roughly 4,000 parameters per example &mdash; ample capacity to memorize
+the training lakes, which is also why the tile-split leak inflated scores so effectively.
+</p>
+
+<h3>The fix: global average pooling</h3>
+<figure>
+<svg viewBox="0 0 980 290" role="img" aria-label="Two heads from the same 64 by 64 by 64 feature block. Flatten produces 262,144 values and a 33.55 million parameter dense layer. Global average pooling produces 64 values and an 8,320 parameter dense layer. Both end at 128 features and one logit.">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="105" width="120" height="80" rx="8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <g font-size="12.5" fill="currentColor" text-anchor="middle">
+    <text x="80" y="140">features</text>
+    <text x="80" y="158">64&times;64&times;64</text>
+  </g>
+  <!-- top branch: flatten -->
+  <g stroke="var(--danger)" stroke-width="1.4" marker-end="url(#arr3)" fill="none">
+    <path d="M140,125 C 200,125 210,70 268,70"/>
+    <line x1="360" y1="70" x2="470" y2="70"/>
+  </g>
+  <rect x="272" y="42" width="86" height="56" rx="6" fill="none" stroke="var(--danger)" stroke-width="1.4"/>
+  <g font-size="12" text-anchor="middle" fill="var(--danger)">
+    <text x="315" y="66">262,144</text>
+    <text x="315" y="84">values</text>
+    <text x="200" y="52">flatten</text>
+    <text x="415" y="56" font-family="ui-monospace, Menlo, monospace" font-size="11">Linear</text>
+    <text x="415" y="94" font-weight="600">33.55&thinsp;M params</text>
+  </g>
+  <!-- bottom branch: GAP -->
+  <g stroke="var(--good)" stroke-width="1.4" marker-end="url(#arr3)" fill="none">
+    <path d="M140,165 C 200,165 210,220 268,220"/>
+    <line x1="360" y1="220" x2="470" y2="220"/>
+  </g>
+  <rect x="272" y="192" width="86" height="56" rx="6" fill="none" stroke="var(--good)" stroke-width="1.4"/>
+  <g font-size="12" text-anchor="middle" fill="var(--good)">
+    <text x="315" y="216">64</text>
+    <text x="315" y="234">values</text>
+    <text x="196" y="252">global avg pool</text>
+    <text x="415" y="206" font-family="ui-monospace, Menlo, monospace" font-size="11">Linear</text>
+    <text x="415" y="244" font-weight="600">8,320 params</text>
+  </g>
+  <!-- shared tail -->
+  <rect x="474" y="117" width="58" height="46" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <text x="503" y="144" font-size="12.5" fill="currentColor" text-anchor="middle">128</text>
+  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr3)">
+    <line x1="532" y1="140" x2="576" y2="140"/>
+  </g>
+  <circle cx="600" cy="140" r="20" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <text x="600" y="144" font-size="12.5" fill="currentColor" text-anchor="middle">1</text>
+  <g font-size="12" fill="currentColor" opacity="0.85">
+    <text x="660" y="120">same conv stack, same output;</text>
+    <text x="660" y="140">the head shrinks &asymp;1,000&times;</text>
+    <text x="660" y="160">(33.6&thinsp;M &rarr; &asymp;32&thinsp;k total)</text>
+  </g>
+</svg>
+<figcaption>Two heads on the same feature block. Averaging each channel to one number before the
+dense layer removes the resolution dependence entirely &mdash; the model also stops caring what
+size the input image is.</figcaption>
+</figure>
+<p>
+The planned architecture revision replaces flatten with GAP and adds batch normalization after
+each conv, dropout before the final layer, and flip/rotation augmentation (satellite tiles have
+no canonical orientation, so this is a free 8&times; on the data).
+</p>
+
+<h2>6. Baselines any model must beat</h2>
+<p>Measured on 40 held-out lakes (1,000 frames) of the current dataset:</p>
+<table>
+<tr><th>baseline</th><th>accuracy</th><th>what it knows</th></tr>
+<tr><td>majority class ("always useful")</td><td class="num">68.4%</td><td>nothing</td></tr>
+<tr><td>JPG file-size threshold (44&thinsp;KB)</td><td class="num">82.5%</td><td>one byte count per image</td></tr>
+</table>
+<p>
+The file-size baseline works because JPEG compression is an entropy meter: clear ice is detailed
+and compresses poorly, cloud is smooth and compresses well
+(<code>cloudytile/splits.py::filesize_baseline</code>). Any reported CNN accuracy should be
+quoted against <strong>82.5%</strong>, not against chance &mdash; the interesting margin is what
+the network earns above a <code>stat()</code> call. Scene-level
+<code>eo_cloud_cover</code> metadata, for comparison, is nearly uninformative about per-tile
+usability and in 2019 actually ran backwards against human judgment.
+</p>
+
+<h2>7. Running it</h2>
+<h3>Extract frames for labeling (Sherlock)</h3>
+<pre><code>sbatch engine/preprocessing/extract_label_frames.sh
+# 200 lakes x 25 frames per year from the SDR deposit, &lt;50% NaN, seeded</code></pre>
+<h3>Label (local browser GUI)</h3>
+<pre><code>python3 engine/labeling/label_gui.py --image_dir data/label_frames_2019
+# left arrow = 0 not useful | right arrow = 1 useful
+# backspace = back one frame | space = forward | h = help with examples
+# writes labels/labels.csv atomically after every keypress; resume is automatic</code></pre>
+<h3>Train</h3>
+<pre><code>python3 engine/training/run_training.py \
+    --labels_csv labels/labels.csv \
+    --image_dir data/label_frames_all \
+    --optimize_metric loss --save_path best_model.pth
+# splits by lake by default; test metrics are computed on the restored
+# best-validation checkpoint, i.e. the same weights written to --save_path</code></pre>
+<h3>Inference over the lake archive</h3>
+<pre><code>from cloudytile.inference import process_directory
+process_directory(nc_dir=..., model_path="best_model.pth",
+                  nc_channels=["red","green","blue"],
+                  var_name="cloudy_seq_rgb", output_dir=...)</code></pre>
+
+<h2>8. Lessons encoded in this repo</h2>
+<ul>
+<li><strong>Split by group, not by sample</strong>, whenever samples are correlated &mdash; here,
+frames of the same lake. The guard is one assert; the silent version of the bug costs months.</li>
+<li><strong>Report the dumb baseline.</strong> A file-size threshold scored 88% on the old
+dataset; nobody knew because nobody computed it.</li>
+<li><strong>Metrics must describe the artifact.</strong> Training now restores the best
+checkpoint before the test pass, so the printed numbers describe the saved weights.</li>
+<li><strong>Parameter counts hide in dense layers.</strong> Print them per layer once per
+architecture change; a flatten head scales with image area, not intent.</li>
+<li><strong>Label many groups shallowly</strong> rather than few groups deeply: 400 lakes
+&times; 25 frames beats 60 lakes &times; 35 frames at the same labeling cost.</li>
+</ul>
+
+</body>
+</html>

@@ -37,3 +37,6 @@ sandbox/
 
 # Wandb
 wandb/
+
+# Claude diary
+docs/claudiary/
