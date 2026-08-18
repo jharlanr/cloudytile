@@ -182,6 +182,10 @@ def summarize(out_dir: Path):
 def main():
     p = argparse.ArgumentParser(description="Lake-grouped CV over a config grid")
     p.add_argument("--labels_csv", type=str, default="labels/labels.csv")
+    p.add_argument("--split_dir", type=str, default=None,
+                   help="Frozen split directory (engine/make_splits.py). Folds "
+                        "are drawn from train+val ONLY; the frozen test lakes "
+                        "are never seen during selection. Strongly recommended.")
     p.add_argument("--nc_dir", type=str, default=None,
                    help="Directory of per-tile .nc files")
     p.add_argument("--band_stats", type=str, default=None)
@@ -213,16 +217,36 @@ def main():
     if args.nc_dir is None:
         p.error("--nc_dir is required unless --summarize")
 
-    from cloudytile.splits import lake_group_kfold
+    import tempfile as _tempfile
+
+    from cloudytile.splits import dev_labels, lake_group_kfold
 
     configs = GRID if args.config_index < 0 else [GRID[args.config_index]]
     print(f"{len(GRID)} configs in grid; running {len(configs)} "
           f"x {args.folds} folds at {args.img_size}px")
 
+    # Restrict selection to the development lakes. Without this the grid folds
+    # over every lake, and picking the best of 32 configs by fold score is
+    # selection on the test set.
+    labels_for_cv = args.labels_csv
+    _tmp_ctx = None
+    if args.split_dir:
+        dev = dev_labels(args.split_dir, args.labels_csv)
+        _tmp_ctx = _tempfile.TemporaryDirectory()
+        labels_for_cv = Path(_tmp_ctx.name) / "dev_labels.csv"
+        dev[["filename", "label"]].to_csv(labels_for_cv, index=False)
+        print(f"Selection pool: {len(dev)} tiles / {dev['lake_id'].nunique()} "
+              f"dev lakes (frozen test lakes excluded)")
+    else:
+        print("WARNING: no --split_dir; folding over ALL lakes. The winning "
+              "config's score will be optimistically biased.")
+
     # Folds are a function of (labels, folds, seed) only — identical for every
     # config, which is what makes config scores comparable.
-    folds = list(lake_group_kfold(args.labels_csv, n_splits=args.folds,
+    folds = list(lake_group_kfold(labels_for_cv, n_splits=args.folds,
                                   seed=args.seed))
+    if _tmp_ctx is not None:
+        _tmp_ctx.cleanup()
 
     for cfg in configs:
         for fold, train_df, test_df in folds:

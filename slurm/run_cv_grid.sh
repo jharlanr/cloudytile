@@ -17,6 +17,9 @@
 # =============================================================================
 # Lake-grouped CV grid: 32 configs (bands x arch x lr x optimizer) x 3 folds
 #
+# Folds are drawn from the frozen split's train+val lakes only; the 80 test
+# lakes are never seen during selection.
+#
 # One config per array task. Resumable: rerun the same sbatch and finished
 # (config, fold) JSONs are skipped. Aggregate afterwards from a login node:
 #   python3 engine/run_cv_grid.py --out_dir <OUT_DIR> --summarize
@@ -39,12 +42,14 @@ REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
 NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc_10k"
 BAND_STATS="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats_10k.json"
 OUT_DIR="/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/cv_results"
+SPLIT_DIR="$REPO_DIR/splits/cloudytile_v1"
 
 export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 mkdir -p "$OUT_DIR"
 
 python3 "$REPO_DIR/engine/run_cv_grid.py" \
     --labels_csv "$REPO_DIR/labels/labels.csv" \
+    --split_dir "$SPLIT_DIR" \
     --nc_dir "$NC_DIR" \
     --band_stats "$BAND_STATS" \
     --out_dir "$OUT_DIR" \

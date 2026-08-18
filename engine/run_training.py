@@ -55,8 +55,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cloudytile.data import CloudyTileDataset, CloudyTileDatasetNC, create_splits
 from cloudytile.model import CloudyTileCNN
-from cloudytile.splits import assert_lake_disjoint, create_lake_splits
-from cloudytile.training import train_one_epoch, evaluate
+from cloudytile.splits import (assert_lake_disjoint, create_lake_splits,
+                               load_frozen_split)
+from cloudytile.training import train_one_epoch, evaluate, predict_probs, pick_threshold
 
 
 def set_seed(seed: int):
@@ -108,7 +109,14 @@ def train(config: dict):
         seed=config.get("seed", 42),
         output_dir=config.get("splits_dir"),
     )
-    if split_by == "lake":
+    if config.get("split_dir"):
+        # Frozen lake-ID lists: the reproducible path, and the only one that
+        # keeps the test lakes fixed as labels grow.
+        train_df, val_df, test_df = load_frozen_split(
+            config["split_dir"], config["labels_csv"]
+        )
+        assert_lake_disjoint(train_df, val_df, test_df)
+    elif split_by == "lake":
         train_df, val_df, test_df = create_lake_splits(
             config["labels_csv"], **split_kwargs
         )
@@ -324,8 +332,27 @@ def train(config: dict):
             num_workers=config.get("num_workers", 4),
         )
 
-        test_loss, test_metrics = evaluate(model, test_loader, criterion, device)
-        print(f"\nTest Results:")
+        # Choose the operating point on VALIDATION, then apply it to test.
+        # 0.5 is only optimal when the two error types cost the same; letting a
+        # cloudy frame through corrupts a downstream drainage call, while
+        # dropping a clear frame costs one observation out of ~90 per lake.
+        threshold = 0.5
+        if config.get("tune_threshold", True):
+            _, val_labels, val_probs = predict_probs(
+                model, val_loader, criterion, device
+            )
+            threshold, val_at_t = pick_threshold(
+                val_labels, val_probs,
+                objective=config.get("threshold_objective", "f1"),
+                target_precision=config.get("target_precision", 0.95),
+            )
+            print(f"\nOperating point from validation: threshold={threshold:.3f} "
+                  f"(val precision={val_at_t['precision']:.3f} "
+                  f"recall={val_at_t['recall']:.3f} f1={val_at_t['f1']:.3f})")
+
+        test_loss, test_metrics = evaluate(model, test_loader, criterion, device,
+                                           threshold=threshold)
+        print(f"\nTest Results (threshold={threshold:.3f}):")
         print(f"  Loss: {test_loss:.4f}")
         print(f"  Accuracy:  {test_metrics['accuracy']:.4f}")
         print(f"  Precision: {test_metrics['precision']:.4f}")
@@ -460,8 +487,21 @@ def main():
     parser.add_argument("--no_batchnorm", action="store_true")
     parser.add_argument("--no_augment", action="store_true",
                         help="Disable train-time flips/rotations")
+    parser.add_argument("--split_dir", type=str, default=None,
+                        help="Frozen split directory from engine/make_splits.py "
+                             "(overrides --split_by; the reproducible path)")
+    parser.add_argument("--no_tune_threshold", action="store_true",
+                        help="Report test metrics at a fixed 0.5 instead of at "
+                             "an operating point chosen on validation")
+    parser.add_argument("--threshold_objective", type=str, default="f1",
+                        choices=["f1", "target_precision"],
+                        help="'target_precision' maximizes recall subject to a "
+                             "precision floor — use when false positives are "
+                             "costlier than false negatives")
+    parser.add_argument("--target_precision", type=float, default=0.95)
     args = parser.parse_args()
     args.augment = not args.no_augment
+    args.tune_threshold = not args.no_tune_threshold
 
     if args.nc_dir is None and args.image_dir is None:
         parser.error("provide --nc_dir (standard) or --image_dir (legacy JPG)")

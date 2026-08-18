@@ -1,0 +1,26 @@
+{
+  "labels_csv": "labels/labels.csv",
+  "n_labels": 10000,
+  "seed": 42,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.1,
+    "test": 0.2
+  },
+  "grouped_by": "lake_id",
+  "n_lakes": {
+    "train": 280,
+    "val": 40,
+    "test": 80
+  },
+  "n_tiles": {
+    "train": 7000,
+    "val": 1000,
+    "test": 2000
+  },
+  "positive_rate": {
+    "train": 0.6928571428571428,
+    "val": 0.658,
+    "test": 0.6755
+  }
+}

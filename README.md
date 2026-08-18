@@ -66,30 +66,39 @@ cloudy-tile/
    python3 engine/label_gui.py --image_dir data/label_frames_2019
    # ← = 0 not useful | → = 1 useful | backspace = back | space = skip | h = help
    ```
-3. **Extract training tiles** — one 6-band `.nc` per labeled frame
+3. **Freeze the split** — once, before any model selection, then commit it:
+   ```bash
+   python3 engine/make_splits.py --labels_csv labels/labels.csv \
+       --out_dir splits/cloudytile_v1
+   ```
+   Writes lake-ID lists (`{train,val,test}_ids.json`), matching the ESSD deposit's
+   layout. `splits/cloudytile_v1` is the current split: **280 / 40 / 80 lakes**.
+4. **Extract training tiles** — one 6-band `.nc` per labeled frame
    (JPGs are for human eyes only; training reads NetCDF):
    ```bash
    sbatch slurm/extract_training_nc.sh
    sbatch slurm/compute_band_stats.sh
    ```
-4. **Train**:
+5. **Train**:
    ```bash
    python3 engine/run_training.py \
        --labels_csv labels/labels.csv \
+       --split_dir splits/cloudytile_v1 \
        --nc_dir /path/to/training_nc_10k \
        --band_stats /path/to/band_stats_10k.json \
        --optimize_metric loss --save_path best_model.pth
    ```
-   Splits are **lake-grouped by default** (`--split_by tile` exists only to reproduce old runs
-   and warns). Test metrics are computed on the restored best-validation checkpoint — the same
-   weights written to `--save_path`.
-5. **Model selection** — small grid (bands × width × lr × optimizer = 32 configs), each scored
-   with identical lake-grouped folds:
+   Splits are always lake-grouped; `--split_dir` (frozen) is the reproducible path, and
+   `--split_by tile` exists only to reproduce old runs and warns. Test metrics are computed on
+   the restored best-validation checkpoint — the same weights written to `--save_path` — at an
+   operating point chosen on validation (see Class balance below).
+6. **Model selection** — small grid (bands × width × lr × optimizer = 32 configs), each scored
+   with identical lake-grouped folds drawn from the **train+val lakes only**:
    ```bash
    sbatch slurm/run_cv_grid.sh
    python3 engine/run_cv_grid.py --out_dir <results> --summarize
    ```
-6. **Inference** over the lake archive:
+7. **Inference** over the lake archive:
    ```bash
    python3 engine/run_inference.py --model best_model.pth --input /path/to/nc_dir
    ```
@@ -112,9 +121,31 @@ global-average-pooling head — ~32k parameters, input-size agnostic. The legacy
 (33.5M parameters at 512px, 99.9% of them in one dense layer) is kept only for loading
 pre-August-2026 checkpoints: `head="flatten", batch_norm=False, dropout=0.0`.
 
+## Class balance and the operating point
+
+The dataset is 68.6% useful / 31.4% not useful — about **2.2:1**, which is mild. That does not
+warrant focal loss or class weights; plain `BCEWithLogitsLoss` is correct, and
+`StratifiedGroupKFold` already balances label proportions across folds.
+
+What is genuinely asymmetric is the **cost** of the two errors. A false positive puts a cloudy
+frame into lake-vision's timeseries and can corrupt a drainage call; a false negative drops one
+observation from a lake that has ~90 usable ones. So precision on the useful class is worth more
+than recall — and the right lever is the **decision threshold**, not the loss.
+
+`run_training.py` therefore picks a threshold on the validation lakes and applies it to test:
+
+```bash
+--threshold_objective f1                                   # default, balanced
+--threshold_objective target_precision --target_precision 0.97   # cost-asymmetric
+--no_tune_threshold                                        # report at 0.5
+```
+
+One training run yields the whole precision/recall curve, the operating point stays a single
+reportable number, and it can be changed later without retraining.
+
 ## Baselines
 
-Report accuracy against these, not against chance (40 held-out lakes, current dataset):
+Report against these, not against chance (held-out lakes, current dataset):
 
 | baseline | accuracy |
 |---|---|
@@ -122,7 +153,9 @@ Report accuracy against these, not against chance (40 held-out lakes, current da
 | JPG file-size threshold | 82.5% |
 
 `cloudytile/splits.py::filesize_baseline` computes the second; anything a model earns above it is
-work on the actual clear-vs-cloud problem.
+work on the actual clear-vs-cloud problem. Because accuracy sits so close to the majority rate,
+prefer **AUC** (threshold-free) plus precision/recall at the chosen operating point as headline
+numbers.
 
 ## Tests
 

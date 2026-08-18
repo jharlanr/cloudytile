@@ -10,6 +10,7 @@ lake_id, so a lake lands wholly inside one split.
 This supersedes data.py::create_splits for any reported number. That function
 is left in place unchanged so older runs stay reproducible.
 """
+import json
 import re
 from pathlib import Path
 from typing import Iterator, Optional, Union
@@ -159,6 +160,112 @@ def lake_group_kfold(
               f"test {len(test_df)} tiles / {test_df['lake_id'].nunique()} lakes, "
               f"test class 1: {100 * test_df['label'].mean():.1f}%")
         yield i, train_df, test_df
+
+
+def freeze_split(
+    labels_csv: Union[str, Path],
+    out_dir: Union[str, Path],
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.2,
+    seed: int = 42,
+) -> dict:
+    """
+    Write a split to disk as lake-ID lists, in the ESSD deposit's layout.
+
+    A seed-derived split is only reproducible while labels.csv is byte-identical
+    — add labels later and every partition silently moves. Freezing the lake IDs
+    pins the test set for the life of the project, which is what lets numbers
+    from different weeks be compared, and what a reader needs to reproduce them.
+
+    Writes {train,val,test}_ids.json and split_meta.json into out_dir.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    tr, va, te = create_lake_splits(
+        labels_csv, train_ratio, val_ratio, test_ratio, seed=seed
+    )
+    assert_lake_disjoint(tr, va, te)
+
+    ids = {
+        "train": sorted(tr["lake_id"].unique().tolist()),
+        "val": sorted(va["lake_id"].unique().tolist()),
+        "test": sorted(te["lake_id"].unique().tolist()),
+    }
+    for name, lake_ids in ids.items():
+        (out_dir / f"{name}_ids.json").write_text(json.dumps(lake_ids, indent=2))
+
+    meta = {
+        "labels_csv": str(labels_csv),
+        "n_labels": int(sum(len(p) for p in (tr, va, te))),
+        "seed": seed,
+        "ratios": {"train": train_ratio, "val": val_ratio, "test": test_ratio},
+        "grouped_by": "lake_id",
+        "n_lakes": {k: len(v) for k, v in ids.items()},
+        "n_tiles": {"train": len(tr), "val": len(va), "test": len(te)},
+        "positive_rate": {
+            "train": float(tr["label"].mean()),
+            "val": float(va["label"].mean()),
+            "test": float(te["label"].mean()),
+        },
+    }
+    (out_dir / "split_meta.json").write_text(json.dumps(meta, indent=2))
+    print(f"  Froze split to {out_dir}/")
+    return meta
+
+
+def load_frozen_split(
+    split_dir: Union[str, Path],
+    labels_csv: Union[str, Path],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Load a frozen split and slice a labels CSV by it.
+
+    Labels for lakes absent from the CSV are simply missing; labels for lakes
+    absent from the split raise, since that means the split predates the labels
+    and silently dropping rows would be worse than stopping.
+    """
+    split_dir = Path(split_dir)
+    df = add_lake_id(pd.read_csv(labels_csv))
+
+    ids = {
+        name: set(json.loads((split_dir / f"{name}_ids.json").read_text()))
+        for name in ("train", "val", "test")
+    }
+    known = ids["train"] | ids["val"] | ids["test"]
+    unassigned = set(df["lake_id"]) - known
+    if unassigned:
+        raise ValueError(
+            f"{len(unassigned)} lakes in {labels_csv} are not in {split_dir} "
+            f"(e.g. {sorted(unassigned)[:3]}). Re-freeze the split, or the new "
+            f"labels will be silently dropped."
+        )
+
+    parts = tuple(
+        df[df["lake_id"].isin(ids[name])].reset_index(drop=True)
+        for name in ("train", "val", "test")
+    )
+    assert_lake_disjoint(*parts)
+    print(f"Frozen split from {split_dir}:")
+    for name, part in zip(("train", "val", "test"), parts):
+        _summarize(name, part)
+    return parts
+
+
+def dev_labels(
+    split_dir: Union[str, Path],
+    labels_csv: Union[str, Path],
+) -> pd.DataFrame:
+    """
+    Train+val rows only — the development set for model selection.
+
+    Hyperparameter search must never fold over the frozen test lakes: picking
+    the best of N configs by test score is selection on the test set, and the
+    winner's score is biased upward by roughly the spread across configs.
+    """
+    tr, va, _ = load_frozen_split(split_dir, labels_csv)
+    return pd.concat([tr, va], ignore_index=True)
 
 
 def assert_lake_disjoint(*parts: pd.DataFrame) -> None:
