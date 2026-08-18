@@ -51,7 +51,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cloudytile.data import CloudyTileDataset, CloudyTileDatasetNC, create_splits
 from cloudytile.model import CloudyTileCNN
@@ -128,14 +128,16 @@ def train(config: dict):
         train_df.to_csv(tmpdir / "train.csv", index=False)
         val_df.to_csv(tmpdir / "val.csv", index=False)
 
-        # Create datasets
+        # Create datasets. NC is the primary path: JPGs exist only for
+        # labeling, training reads the per-tile 6-band .nc files.
         img_size = (config.get("img_size", 512), config.get("img_size", 512))
-        use_nc = config.get("use_nc", False)
+        use_nc = config.get("nc_dir") is not None
 
         if use_nc:
             # Multi-spectral mode: load from NC files
-            nc_dir = config.get("nc_dir", config["image_dir"])
-            channels = config.get("nc_channels", ["red", "green", "blue", "nir", "swir1", "swir2"])
+            nc_dir = config["nc_dir"]
+            channels = config.get("nc_channels") or \
+                ["red", "green", "blue", "nir", "swir16", "swir22"]
             # Auto-detect in_channels from channel list if not explicitly set
             in_channels = config.get("in_channels") or len(channels)
             # Create a readable band combo string for wandb grouping
@@ -148,8 +150,8 @@ def train(config: dict):
                     "band_combo": band_combo,
                     "n_channels": in_channels,
                     "has_nir": "nir" in channels,
-                    "has_swir1": "swir1" in channels,
-                    "has_swir2": "swir2" in channels,
+                    "has_swir16": "swir16" in channels,
+                    "has_swir22": "swir22" in channels,
                 }, allow_val_change=True)
 
             # Get band statistics path for normalization
@@ -163,6 +165,7 @@ def train(config: dict):
                 channels=channels,
                 img_size=img_size,
                 band_stats=band_stats,
+                augment=config.get("augment", True),
             )
             val_dataset = CloudyTileDatasetNC(
                 tmpdir / "val.csv",
@@ -207,7 +210,11 @@ def train(config: dict):
             channels=config.get("channels", [16, 32, 64]),
             fc_layers=config.get("fc_layers", [128]),
             in_channels=in_channels,
+            head=config.get("head", "gap"),
+            batch_norm=not config.get("no_batchnorm", False),
+            dropout=config.get("dropout", 0.3),
         ).to(device)
+        print(f"Model: head={model.head}, {model.n_parameters():,} parameters")
 
         # Loss and optimizer
         criterion = nn.BCEWithLogitsLoss()
@@ -406,8 +413,12 @@ def main():
     parser = argparse.ArgumentParser(description="Train CloudyTileCNN")
     parser.add_argument("--labels_csv", type=str, required=True,
                         help="Path to labels CSV")
-    parser.add_argument("--image_dir", type=str, required=True,
-                        help="Directory containing images")
+    parser.add_argument("--nc_dir", type=str, default=None,
+                        help="Directory of per-tile .nc files (the standard "
+                             "path; see extract_training_nc.py)")
+    parser.add_argument("--image_dir", type=str, default=None,
+                        help="Directory of JPG images (legacy RGB path; used "
+                             "only if --nc_dir is not given)")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -434,18 +445,26 @@ def main():
     parser.add_argument("--wandb_name", type=str, default=None)
     parser.add_argument("--no_wandb", action="store_true",
                         help="Disable wandb logging")
-    parser.add_argument("--use_nc", action="store_true",
-                        help="Use NetCDF files instead of JPGs (multi-spectral mode)")
-    parser.add_argument("--nc_dir", type=str, default=None,
-                        help="Directory containing NC files (defaults to image_dir)")
     parser.add_argument("--nc_channels", type=parse_string_list,
-                        default=["red", "green", "blue", "nir", "swir1", "swir2"],
-                        help="Channels to load from NC files (e.g., 'red green blue' or \"['red','green','blue']\")")
+                        default=None,
+                        help="Channels to load from NC files (default: all six "
+                             "SDR bands red green blue nir swir16 swir22)")
     parser.add_argument("--in_channels", type=int, default=None,
                         help="Number of input channels (auto-detected if not set)")
     parser.add_argument("--band_stats", type=str, default=None,
                         help="Path to JSON file with per-band normalization statistics")
+    parser.add_argument("--head", type=str, default="gap",
+                        choices=["gap", "flatten"],
+                        help="Classifier head; 'flatten' only for legacy checkpoints")
+    parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--no_batchnorm", action="store_true")
+    parser.add_argument("--no_augment", action="store_true",
+                        help="Disable train-time flips/rotations")
     args = parser.parse_args()
+    args.augment = not args.no_augment
+
+    if args.nc_dir is None and args.image_dir is None:
+        parser.error("provide --nc_dir (standard) or --image_dir (legacy JPG)")
 
     config = vars(args)
 
@@ -461,6 +480,7 @@ def main():
         # Ensure required paths are set
         config["labels_csv"] = args.labels_csv
         config["image_dir"] = args.image_dir
+        config["nc_dir"] = args.nc_dir
 
     train(config)
 

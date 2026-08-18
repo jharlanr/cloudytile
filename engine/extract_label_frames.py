@@ -56,7 +56,7 @@ import numpy as np
 import xarray as xr
 
 # add repo root to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cloudytile.preprocessing import save_frame_as_jpg
 
@@ -309,7 +309,7 @@ def main():
     if rows and not args.dry_run:
         manifest = Path(args.manifest) if args.manifest else output_dir / "manifest.csv"
         write_manifest(rows, manifest)
-        print(f"\nLabel with:\n  python engine/labeling/label_gui.py "
+        print(f"\nLabel with:\n  python engine/label_gui.py "
               f"--image_dir {output_dir} --labels_csv labels_v2.csv")
 
 

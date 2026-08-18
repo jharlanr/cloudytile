@@ -29,7 +29,8 @@ ml py-scikit-learn/1.5.1_py312
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
 SHERLOCK_DIR="/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile"
 LABELS_CSV="$REPO_DIR/labels/labels.csv"
-IMAGE_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/jpg_tiles"
+NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc_10k"
+BAND_STATS="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats_10k.json"
 SAVE_PATH="$SHERLOCK_DIR/models/best_model.pth"
 
 # Create output directories
@@ -46,16 +47,17 @@ export WANDB_DIR="$SHERLOCK_DIR"
 cd $SHERLOCK_DIR
 
 # Run training
-python3 $REPO_DIR/engine/training/run_training.py \
+python3 $REPO_DIR/engine/run_training.py \
     --labels_csv $LABELS_CSV \
-    --image_dir $IMAGE_DIR \
+    --nc_dir $NC_DIR \
+    --band_stats $BAND_STATS \
     --save_path $SAVE_PATH \
-    --epochs 30 \
+    --epochs 60 \
     --batch_size 32 \
     --lr 1e-3 \
     --img_size 512 \
     --num_workers 8 \
-    --optimize_metric precision \
+    --optimize_metric loss \
     --wandb_project cloudy-tile \
     --wandb_name "sherlock-run"
 

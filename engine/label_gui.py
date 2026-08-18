@@ -6,8 +6,8 @@ time on localhost and records labels straight into labels.csv, the format
 consumed by CloudyTileDataset.
 
 Usage:
-    python engine/labeling/label_gui.py --image_dir /path/to/jpgs
-    python engine/labeling/label_gui.py --image_dir jpgs --labels_csv mine.csv --port 5050
+    python engine/label_gui.py --image_dir /path/to/jpgs
+    python engine/label_gui.py --image_dir jpgs --labels_csv mine.csv --port 5050
 
     Then label in the browser:
         left arrow  = 0 (not useful: cloudy / no data)
@@ -23,11 +23,11 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 # add repo root to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cloudytile.labels import LabelStore
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_DIR = REPO_ROOT / "assets"
 
 # Module-level config — populated by main()

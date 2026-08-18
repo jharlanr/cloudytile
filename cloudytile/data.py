@@ -187,6 +187,15 @@ class CloudyTileDatasetNC(Dataset):
             - Dict with format {"band_name": {"mean": X, "std": Y}, ...}
             - None to skip normalization (not recommended)
         imagery_scale: Scale factor for legacy normalization if band_stats=None
+        augment: Random horizontal/vertical flips and 90-degree rotations
+            (train-time only). Satellite tiles have no canonical orientation,
+            so these are exact symmetries of the task.
+
+    Normalization order matters: pixels are normalized per band FIRST, and NaN
+    (no-data) pixels are then set to exactly 0.0 in normalized space. The old
+    order (nan_to_num before normalizing) turned missing data into a raw value
+    of 0 DN, which per-band stats then mapped to roughly -4 to -5 sigma —
+    no-data masquerading as an extreme dark pixel.
 
     Labels:
         0 = not useful (cloudy/no data)
@@ -200,12 +209,14 @@ class CloudyTileDatasetNC(Dataset):
         img_size: tuple[int, int] = (512, 512),
         band_stats: Optional[Union[str, Path, Dict]] = None,
         imagery_scale: float = 10000.0,
+        augment: bool = False,
     ):
         self.labels_df = pd.read_csv(labels_csv)
         self.nc_dir = Path(nc_dir)
         self.channels = channels
         self.img_size = img_size
         self.imagery_scale = imagery_scale
+        self.augment = augment
 
         # Load band statistics
         if band_stats is None:
@@ -265,9 +276,9 @@ class CloudyTileDatasetNC(Dataset):
         with xr.open_dataset(nc_path) as ds:
             # Select channels
             imagery = ds["imagery"].sel(channel=self.channels).values  # [C, H, W]
+        imagery = imagery.astype(np.float32)
 
-        # Replace NaNs with 0
-        imagery = np.nan_to_num(imagery, nan=0.0)
+        nan_mask = np.isnan(imagery)
 
         # Normalize per-band using mean/std statistics
         if self.band_stats is not None:
@@ -283,6 +294,9 @@ class CloudyTileDatasetNC(Dataset):
             # Legacy normalization: simple division
             imagery = np.clip(imagery / self.imagery_scale, 0.0, 1.0)
 
+        # No-data sits at exactly 0.0 in NORMALIZED space (see class docstring)
+        imagery[nan_mask] = 0.0
+
         # Resize if needed
         if imagery.shape[1:] != self.img_size:
             # Use torch interpolate for resizing
@@ -297,6 +311,16 @@ class CloudyTileDatasetNC(Dataset):
 
         # Convert to tensor
         image = torch.from_numpy(imagery).float()
+
+        if self.augment:
+            if torch.rand(1).item() < 0.5:
+                image = torch.flip(image, dims=[2])   # horizontal
+            if torch.rand(1).item() < 0.5:
+                image = torch.flip(image, dims=[1])   # vertical
+            k = int(torch.randint(0, 4, (1,)).item())
+            if k:
+                image = torch.rot90(image, k, dims=[1, 2])
+
         label = int(row["label"])
 
         return image, label

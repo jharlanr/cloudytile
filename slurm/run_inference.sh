@@ -65,7 +65,7 @@ IMG_SIZE=512
 # ============================================================================
 
 # Run inference
-python3 $REPO_DIR/engine/inference/run_inference.py \
+python3 $REPO_DIR/engine/run_inference.py \
     --model $MODEL_PATH \
     --input $INPUT_DIR \
     --img_size $IMG_SIZE \

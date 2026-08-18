@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cloudytile.inference import load_model, add_cloudy_seq_to_nc, process_directory
 

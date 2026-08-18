@@ -1,14 +1,16 @@
 # cloudytile
 
-`cloudytile` is a PyTorch-based binary classifier that determines whether satellite imagery tiles are "useful" or "not useful" based on cloud coverage and no-data pixels. It's designed as a preprocessing step for downstream tasks like lake drainage classification (see [YaoGroup/lake-vision](https://github.com/YaoGroup/lake-vision)).
+`cloudytile` is a PyTorch binary classifier that decides whether a satellite imagery tile is
+**useful** (clear enough to read the lake, even through thin cloud) or **not useful**
+(cloud-obscured / mostly no-data). It exists because Sentinel-2's own cloud masks are unreliable
+over bright ice. Its per-timestep predictions (`cloudy_seq_rgb`) feed the downstream
+[YaoGroup/lake-vision](https://github.com/YaoGroup/lake-vision) drainage classifier.
+
+New here? Read **[docs/lecture-cloudytile.html](docs/lecture-cloudytile.html)** — a pedagogical
+walkthrough of the pipeline, the dataset, and the architecture.
 
 ## Tile Examples
 <table>
-  <tr>
-    <th></th>
-    <th> </th>
-    <th> </th>
-  </tr>
   <tr>
     <th align="right">useful</th>
     <td><img src="assets/eg_useful1.png" alt="useful 1" width="240"/></td>
@@ -21,232 +23,129 @@
   </tr>
 </table>
 
-Note that even though the second example of a 'useful' tile is notably cloudy, there is still useful information about the presence of a lake (e.g., we can see through the thin cloud layer and determine that the tile has a lake, and its rough extent). This information is useful in downstream applications, such as lake detection and drainage classification. If we were to use a strict cloud cut or other methods, we may erroneously ignore the utility of this tile.
+Note the second "useful" example is visibly cloudy — the lake still reads through the thin layer,
+so the tile carries information. Usability, not cloud presence, is the label.
 
 ## Repository Structure
 
 ```
 cloudy-tile/
-├── cloudytile/              # Main Python package (importable)
-│   ├── __init__.py
-│   ├── model.py             # CloudyTileCNN architecture
-│   ├── data.py              # PyTorch Dataset and data splitting
-│   ├── inference.py         # Model loading and prediction utilities
-│   ├── training.py          # Training and evaluation functions
-│   └── preprocessing.py     # NetCDF to JPG extraction
-├── engine/                  # Runnable scripts (entry points)
-│   ├── preprocessing/
-│   │   └── extract_jpgs.py
-│   ├── training/
-│   │   ├── run_training.py           # Main training script
-│   │   ├── run_spectral_array.sh     # SLURM array job for spectral band sweep
-│   │   ├── train_top3_models.sh      # Train and save top 3 spectral models
-│   │   ├── run_sweep.sh              # SLURM job for wandb sweeps
-│   │   └── sweep.yaml                # Hyperparameter sweep configuration
-│   ├── inference/
-│   │   └── run_inference_lakes.sh    # Run inference on lake NC files
-│   └── labeling/
-│       └── export_labelbox.py
+├── cloudytile/                  # Importable package
+│   ├── model.py                 # CloudyTileCNN (GAP head; legacy flatten kept)
+│   ├── data.py                  # Datasets (NC primary, JPG legacy)
+│   ├── splits.py                # Lake-grouped splitting + baselines
+│   ├── labels.py                # Label CSV store (atomic writes)
+│   ├── training.py              # Train/eval loops and metrics
+│   ├── inference.py             # cloudy_seq prediction on lake NC files
+│   ├── preprocessing.py         # NetCDF -> JPG rendering helpers
+│   └── tests/                   # pytest suite
+├── engine/                      # Runnable scripts (flat, pure Python)
+│   ├── extract_label_frames.py  # SDR .nc -> JPGs for labeling
+│   ├── label_gui.py (+index.html)  # Browser labeling GUI
+│   ├── extract_training_nc.py   # labels.csv -> per-tile 6-band .nc
+│   ├── compute_band_stats.py    # Per-band mean/std for normalization
+│   ├── run_training.py          # Single training run
+│   ├── run_cv_grid.py           # Lake-grouped CV over a config grid
+│   └── run_inference.py         # Apply model to lake NC files
+├── slurm/                       # Sherlock submission wrappers (paths, modules)
 ├── labels/
-│   ├── labels.csv           # Current labeling campaign (SDR frames)
-│   └── labels_deprecated.csv  # Retired Labelbox export (old jpg_tiles)
-└── assets/                  # Documentation images
+│   ├── labels.csv               # Current campaign: 10,000 frames, 400 lakes
+│   └── labels_deprecated.csv    # Retired Labelbox export (do not merge)
+└── docs/                        # Lecture + (gitignored) claudiary
 ```
 
-## Installation
+## The Pipeline
 
-```bash
-git clone https://github.com/jharlanr/cloudy-tile.git
-cd cloudy-tile
-pip install -e .
-```
-
-### Dependencies
-- PyTorch, torchvision
-- xarray (NetCDF handling)
-- PIL/Pillow (image I/O)
-- pandas, numpy
-- scikit-learn (data splitting)
-- wandb (optional, for experiment tracking)
-- labelbox (optional, for annotation fetching)
-
-## Usage
-
-### Training
-
-**Local training:**
-```bash
-python engine/training/run_training.py \
-    --labels_csv labels/labels.csv \
-    --image_dir /path/to/jpg_tiles \
-    --epochs 30 \
-    --batch_size 32 \
-    --lr 1e-3 \
-    --optimize_metric precision \
-    --save_path best_model.pth
-```
-
-**Key training arguments:**
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--epochs` | 20 | Number of training epochs |
-| `--batch_size` | 32 | Batch size |
-| `--lr` | 1e-3 | Learning rate |
-| `--img_size` | 512 | Input image size |
-| `--channels` | [16, 32, 64] | Conv layer channel sizes |
-| `--fc_layers` | [128] | Fully connected layer sizes |
-| `--optimize_metric` | precision | Metric for model selection (accuracy, precision, recall, f1, auc) |
-| `--use_scheduler` | False | Use learning rate scheduler |
-| `--weight_decay` | 0.0 | L2 regularization |
-
-### Hyperparameter Sweeps (wandb)
-
-1. **Create sweep** (from login node with internet):
+1. **Extract frames for labeling** — samples lakes × random timesteps from the ESSD SDR deposit,
+   drops frames ≥50% no-data, renders true-color JPGs:
    ```bash
-   cd engine/training
-   wandb sweep sweep.yaml
-   # Returns: Created sweep with ID: <username>/<project>/<sweep_id>
+   sbatch slurm/extract_label_frames.sh
+   ```
+2. **Label** — one image, two keys, atomic CSV writes, automatic resume:
+   ```bash
+   python3 engine/label_gui.py --image_dir data/label_frames_2019
+   # ← = 0 not useful | → = 1 useful | backspace = back | space = skip | h = help
+   ```
+3. **Extract training tiles** — one 6-band `.nc` per labeled frame
+   (JPGs are for human eyes only; training reads NetCDF):
+   ```bash
+   sbatch slurm/extract_training_nc.sh
+   sbatch slurm/compute_band_stats.sh
+   ```
+4. **Train**:
+   ```bash
+   python3 engine/run_training.py \
+       --labels_csv labels/labels.csv \
+       --nc_dir /path/to/training_nc_10k \
+       --band_stats /path/to/band_stats_10k.json \
+       --optimize_metric loss --save_path best_model.pth
+   ```
+   Splits are **lake-grouped by default** (`--split_by tile` exists only to reproduce old runs
+   and warns). Test metrics are computed on the restored best-validation checkpoint — the same
+   weights written to `--save_path`.
+5. **Model selection** — small grid (bands × width × lr × optimizer = 32 configs), each scored
+   with identical lake-grouped folds:
+   ```bash
+   sbatch slurm/run_cv_grid.sh
+   python3 engine/run_cv_grid.py --out_dir <results> --summarize
+   ```
+6. **Inference** over the lake archive:
+   ```bash
+   python3 engine/run_inference.py --model best_model.pth --input /path/to/nc_dir
    ```
 
-2. **Run sweep agent**:
-   ```bash
-   # Local
-   wandb agent <sweep_id>
+## Data Conventions
 
-   # On Sherlock (SLURM)
-   sbatch run_sweep.sh <username>/<project>/<sweep_id>
-   ```
+- Frame key: `{lake_id}_t{timestep:03d}` — `.jpg` for labeling, `.nc` for training.
+- `labels/labels.csv`: columns `filename,label`; **0 = not useful, 1 = useful** (polarity is
+  load-bearing downstream).
+- Training tiles carry all six SDR bands (`red, green, blue, nir, swir16, swir22`) as float32
+  surface-reflectance DN with NaN for no-data; band subsetting is a training-time choice
+  (`--nc_channels`).
+- Normalization: per-band mean/std from `band_stats.json`, then NaN → exactly 0.0
+  (in normalized space, in that order — see `CloudyTileDatasetNC`).
 
-3. **Sync offline runs** (if using offline mode):
-   ```bash
-   wandb sync wandb/offline-run-*
-   ```
+## Model
 
-### Inference
+`CloudyTileCNN`: three conv blocks (conv 3×3 → BatchNorm → ReLU → maxpool) and a
+global-average-pooling head — ~32k parameters, input-size agnostic. The legacy flatten head
+(33.5M parameters at 512px, 99.9% of them in one dense layer) is kept only for loading
+pre-August-2026 checkpoints: `head="flatten", batch_norm=False, dropout=0.0`.
 
-```python
-from cloudytile.inference import load_model, predict_from_nc, add_cloudy_seq_to_nc, process_directory
+## Baselines
 
-# Load a trained model
-model = load_model(
-    weights_path="cloudytile_rgb.pth",
-    img_size=(512, 512),
-    in_channels=3,  # Must match training (3 for RGB, 4 for RGBN, etc.)
-)
+Report accuracy against these, not against chance (40 held-out lakes, current dataset):
 
-# Get predictions for all timesteps in a NetCDF file
-predictions = predict_from_nc(
-    model, ds,
-    nc_channels=['red', 'green', 'blue'],
-    band_stats=band_stats_dict,  # Per-band normalization
-)
+| baseline | accuracy |
+|---|---|
+| majority class | 68.4% |
+| JPG file-size threshold | 82.5% |
 
-# Add cloudy_seq variable to NetCDF for use in lake-vision
-add_cloudy_seq_to_nc(
-    nc_path="tile.nc",
-    model=model,
-    nc_channels=['red', 'green', 'blue'],
-    band_stats=band_stats_dict,
-    var_name='cloudy_seq_rgb',  # Custom output variable name
-)
+`cloudytile/splits.py::filesize_baseline` computes the second; anything a model earns above it is
+work on the actual clear-vs-cloud problem.
 
-# Process entire directory (batch inference)
-process_directory(
-    nc_dir="/path/to/input/files",
-    model_path="cloudytile_rgb.pth",
-    nc_channels=['red', 'green', 'blue'],
-    band_stats_path="band_stats.json",
-    var_name='cloudy_seq_rgb',
-    output_dir="/path/to/output/files",  # Optional: write to separate directory
-)
-```
-
-### Data Preprocessing
-
-**Extract JPGs from NetCDF timestacks:**
-```python
-from cloudytile.preprocessing import extract_frames_from_directory
-
-extract_frames_from_directory(
-    nc_dir="/path/to/netcdf_files",
-    output_dir="/path/to/jpg_output",
-    skip_existing=True
-)
-```
-
-### Labeling
-
-Labels are exported from Labelbox:
-```bash
-export LABELBOX_API_KEY="your_key"
-python engine/labeling/export_labelbox.py --output labels/labels_deprecated.csv
-
-# Reuse existing export task (faster):
-python engine/labeling/export_labelbox.py --task_id <task_id> --output labels/labels_deprecated.csv
-```
-
-## Model Architecture
-
-`CloudyTileCNN` is a simple CNN with configurable architecture:
-- **Input**: Multi-spectral images, shape [B, C, H, W] where C depends on band configuration
-- **Conv layers**: Configurable channels (default: [16, 32, 64])
-- **FC layers**: Configurable sizes (default: [128])
-- **Output**: Logits (use sigmoid for probabilities)
-
-### Supported Spectral Bands
-
-The model supports various Sentinel-2 band combinations via the `in_channels` parameter:
-- `red`, `green`, `blue` (visible)
-- `nir` (near-infrared)
-- `swir16` (SWIR Band 11, 1.6μm)
-- `swir22` (SWIR Band 12, 2.2μm)
-
-**Top-performing band combinations** (from spectral sweep):
-1. **RGB** (`red,green,blue`) - 3 channels
-2. **RGB+NIR** (`red,green,blue,nir`) - 4 channels
-3. **B+NIR+SWIR16** (`blue,nir,swir16`) - 3 channels
-
-### Band Statistics (Normalization)
-
-For multi-spectral models, per-band mean/std normalization is recommended. The `band_stats.json` file contains precomputed statistics:
-
-```json
-{
-    "red": {"mean": 1234.5, "std": 567.8},
-    "green": {"mean": 1100.2, "std": 498.3},
-    "blue": {"mean": 900.1, "std": 412.5},
-    "nir": {"mean": 2100.3, "std": 890.2},
-    "swir16": {"mean": 1500.7, "std": 650.4},
-    "swir22": {"mean": 800.9, "std": 380.1}
-}
-```
-
-On Sherlock: `/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json`
-
-## Model Results
-<img src="assets/training.png" alt="Training Metrics" width="480px" />
-<img src="assets/confmats.png" alt="Confusion Matrices" width="480px" />
-
-## HPC (Sherlock) Setup
-
-For Stanford Sherlock users, the training scripts are configured for the `serc` partition:
+## Tests
 
 ```bash
-# Single training run
-sbatch engine/training/run_training.sh
-
-# Hyperparameter sweep (after creating sweep on login node)
-sbatch engine/training/run_sweep.sh <sweep_id>
+python3 -m pytest cloudytile/tests/
 ```
 
-Compute nodes don't have internet access, so wandb runs in offline mode. Sync results from a login node after jobs complete.
+Covers label-store atomicity/merge semantics, lake-split disjointness (including a regression
+test that the old tile-level split leaks), GAP/flatten parameter counts, and the
+NaN-after-normalization contract.
 
-## Related Projects
+## Key Paths (OAK)
 
-- [YaoGroup/lake-vision](https://github.com/YaoGroup/lake-vision) - Downstream lake detection that consumes `cloudy_seq` outputs
+| Resource | Path |
+|---|---|
+| SDR imagery (source of everything) | `data/essd_sdr/data/CW{2018,2019}/` |
+| Labeling frames (JPG) | `data/cloudytile/label_frames_{2018,2019}/` |
+| Training tiles (.nc) | `data/cloudytile/training_nc_10k/` |
+| Band statistics | `data/cloudytile/band_stats_10k.json` |
+| Models / logs / CV results | `sherlock/sherlock_cloudytile/` |
+
+All under `/oak/stanford/groups/cyaolai/JoshRines` (locally `/Volumes/groups/cyaolai/JoshRines`).
 
 ## How to Contribute
 
-If you would like to add new functionality, we welcome contributions as pull requests on [our Github repo](https://github.com/jharlanr/cloudy-tile).
-
-To report bugs or request features, please [open an issue on GitHub](https://github.com/jharlanr/cloudy-tile/issues).
+PRs and issues welcome on [the GitHub repo](https://github.com/jharlanr/cloudy-tile).

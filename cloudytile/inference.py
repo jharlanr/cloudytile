@@ -30,6 +30,9 @@ def load_model(
     fc_layers: list[int] = None,
     in_channels: int = 3,
     device: str = None,
+    head: str = "gap",
+    batch_norm: bool = True,
+    dropout: float = 0.3,
 ) -> CloudyTileCNN:
     """
     Load a trained CloudyTileCNN model from weights.
@@ -41,6 +44,9 @@ def load_model(
         fc_layers: fully-connected layer sizes (must match training)
         in_channels: Number of input channels (must match training, default: 3 for RGB)
         device: device to load model on ('cuda', 'cpu' or None for auto)
+        head/batch_norm/dropout: architecture options, must match training.
+            Checkpoints from before August 2026 need
+            head="flatten", batch_norm=False, dropout=0.0.
 
     Returns:
         Loaded model in eval mode
@@ -53,6 +59,9 @@ def load_model(
         channels=channels,
         fc_layers=fc_layers,
         in_channels=in_channels,
+        head=head,
+        batch_norm=batch_norm,
+        dropout=dropout,
     )
     model.load_state_dict(torch.load(weights_path, map_location=device))
     model.to(device)
@@ -109,11 +118,10 @@ def predict_from_nc(
     imagery = ds["imagery"].values
 
     # Select requested channels: [time, n_channels, y, x]
-    selected = imagery[:, channel_indices, :, :].copy()
+    selected = imagery[:, channel_indices, :, :].astype(np.float32)
     n_frames = selected.shape[0]
 
-    # Handle NaNs
-    selected = np.nan_to_num(selected, nan=0.0)
+    nan_mask = np.isnan(selected)
 
     # Normalize per-band
     if band_stats is not None:
@@ -128,6 +136,10 @@ def predict_from_nc(
     else:
         # Legacy normalization
         selected = np.clip(selected / imagery_scale, 0.0, 1.0)
+
+    # Normalize FIRST, then zero no-data — must match CloudyTileDatasetNC,
+    # otherwise train and inference disagree on what missing pixels look like.
+    selected[nan_mask] = 0.0
 
     predictions = []
 

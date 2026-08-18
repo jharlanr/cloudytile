@@ -14,7 +14,7 @@
 # =============================================================================
 # Compute per-band normalization statistics from training NC files
 #
-# Run this AFTER extract_nc_from_labels.sh and BEFORE training
+# Run this AFTER extract_training_nc.sh and BEFORE training
 # =============================================================================
 
 # Load modules
@@ -33,10 +33,10 @@ export PYTHONUNBUFFERED=1
 # =============================================================================
 
 # Directory containing single-timestep NC files for training
-NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc"
+NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc_10k"
 
 # Output path for band statistics JSON
-OUTPUT_PATH="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats.json"
+OUTPUT_PATH="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/band_stats_10k.json"
 
 # Number of files to sample (use all if you have time, or sample for speed)
 SAMPLE_SIZE=9999999
@@ -56,7 +56,7 @@ echo "Output path:  $OUTPUT_PATH"
 echo "Sample size:  $SAMPLE_SIZE"
 echo ""
 
-python3 $REPO_DIR/engine/preprocessing/compute_band_stats.py \
+python3 $REPO_DIR/engine/compute_band_stats.py \
     --nc_dir $NC_DIR \
     --output_path $OUTPUT_PATH \
     --sample_size $SAMPLE_SIZE

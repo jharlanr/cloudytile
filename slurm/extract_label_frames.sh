@@ -76,7 +76,7 @@ echo "  NaN cutoff: $MAX_NAN_FRAC"
 echo "  Start:      $(date)"
 echo "=============================================="
 
-python3 "$REPO_DIR/engine/preprocessing/extract_label_frames.py" \
+python3 "$REPO_DIR/engine/extract_label_frames.py" \
     --nc_dir "$NC_DIR" \
     --output_dir "$OUTPUT_DIR" \
     --n_lakes $N_LAKES \

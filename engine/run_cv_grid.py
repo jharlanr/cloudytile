@@ -1,0 +1,241 @@
+#!/usr/bin/env python
+"""
+Lake-grouped cross-validation over a small config grid.
+
+Grid axes (32 configs):
+    bands:     rgb | rgb+nir | rgb+swir16 | all6
+    channels:  [16,32,64] | [32,64,128]
+    lr:        1e-3 | 3e-4
+    optimizer: adam | adamw
+
+Every config is scored with the same lake-grouped folds, so numbers are
+comparable across configs and none of them ever sees a test lake in training.
+Within each fold, 15% of the *training* lakes are held out as validation for
+checkpoint selection — the fold's test lakes touch nothing but the final eval.
+
+Each (config, fold) run writes one JSON to --out_dir; a SLURM array maps one
+config per task (--config_index), and --summarize aggregates the JSONs into a
+ranked table with mean +/- std across folds. Designed to be resumable: existing
+result files are skipped.
+
+Usage:
+    # one config (SLURM array task)
+    python run_cv_grid.py --labels_csv labels/labels.csv --nc_dir <tiles> \
+        --band_stats band_stats.json --out_dir cv_results --config_index 7
+
+    # everything sequentially (local/debug)
+    python run_cv_grid.py ... --config_index -1
+
+    # aggregate
+    python run_cv_grid.py --out_dir cv_results --summarize
+"""
+import argparse
+import itertools
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+# add repo root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+BAND_SETS = {
+    "rgb": ["red", "green", "blue"],
+    "rgb+nir": ["red", "green", "blue", "nir"],
+    "rgb+swir16": ["red", "green", "blue", "swir16"],
+    "all6": ["red", "green", "blue", "nir", "swir16", "swir22"],
+}
+CHANNEL_SETS = {"small": [16, 32, 64], "wide": [32, 64, 128]}
+LRS = [1e-3, 3e-4]
+OPTIMIZERS = ["adam", "adamw"]
+
+GRID = [
+    {"bands": b, "arch": a, "lr": lr, "optimizer": opt}
+    for b, a, lr, opt in itertools.product(BAND_SETS, CHANNEL_SETS, LRS, OPTIMIZERS)
+]
+
+
+def config_name(cfg: dict) -> str:
+    return f"{cfg['bands']}_{cfg['arch']}_lr{cfg['lr']:g}_{cfg['optimizer']}"
+
+
+def split_off_val_lakes(train_df: pd.DataFrame, seed: int, val_frac: float = 0.15):
+    """Hold out whole lakes from a fold's training set for checkpoint selection."""
+    lakes = np.sort(train_df["lake_id"].unique())
+    rng = np.random.default_rng(seed)
+    shuffled = rng.permutation(lakes)
+    n_val = max(1, int(round(len(shuffled) * val_frac)))
+    val_lakes = set(shuffled[:n_val])
+    val_df = train_df[train_df["lake_id"].isin(val_lakes)].reset_index(drop=True)
+    tr_df = train_df[~train_df["lake_id"].isin(val_lakes)].reset_index(drop=True)
+    return tr_df, val_df
+
+
+def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader
+
+    from cloudytile.data import CloudyTileDatasetNC
+    from cloudytile.model import CloudyTileCNN
+    from cloudytile.splits import assert_lake_disjoint
+    from cloudytile.training import train_one_epoch, evaluate
+
+    torch.manual_seed(args.seed + fold)
+    np.random.seed(args.seed + fold)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    channels = BAND_SETS[cfg["bands"]]
+    img_size = (args.img_size, args.img_size)
+
+    tr_df, val_df = split_off_val_lakes(train_df, seed=args.seed + fold)
+    assert_lake_disjoint(tr_df, val_df, test_df)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        splits = {}
+        for name, df in (("train", tr_df), ("val", val_df), ("test", test_df)):
+            df.to_csv(tmp / f"{name}.csv", index=False)
+            splits[name] = tmp / f"{name}.csv"
+
+        common = dict(nc_dir=args.nc_dir, channels=channels,
+                      img_size=img_size, band_stats=args.band_stats)
+        train_ds = CloudyTileDatasetNC(splits["train"], augment=True, **common)
+        val_ds = CloudyTileDatasetNC(splits["val"], **common)
+        test_ds = CloudyTileDatasetNC(splits["test"], **common)
+
+        loaders = {
+            "train": DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                                num_workers=args.num_workers, pin_memory=True),
+            "val": DataLoader(val_ds, batch_size=args.batch_size,
+                              num_workers=args.num_workers, pin_memory=True),
+            "test": DataLoader(test_ds, batch_size=args.batch_size,
+                               num_workers=args.num_workers, pin_memory=True),
+        }
+
+        model = CloudyTileCNN(
+            img_size=img_size,
+            channels=CHANNEL_SETS[cfg["arch"]],
+            in_channels=len(channels),
+        ).to(device)
+
+        opt_cls = {"adam": torch.optim.Adam, "adamw": torch.optim.AdamW}[cfg["optimizer"]]
+        optimizer = opt_cls(model.parameters(), lr=cfg["lr"],
+                            weight_decay=args.weight_decay)
+        criterion = nn.BCEWithLogitsLoss()
+
+        best_val, best_state, best_epoch = float("inf"), None, None
+        for epoch in range(args.epochs):
+            train_loss = train_one_epoch(model, loaders["train"], optimizer,
+                                         criterion, device)
+            val_loss, val_metrics = evaluate(model, loaders["val"], criterion, device)
+            if val_loss < best_val:
+                best_val, best_epoch = val_loss, epoch + 1
+                best_state = {k: v.detach().cpu().clone()
+                              for k, v in model.state_dict().items()}
+            print(f"  [{config_name(cfg)} fold {fold}] epoch {epoch+1}/{args.epochs} "
+                  f"train {train_loss:.4f} val {val_loss:.4f} "
+                  f"acc {val_metrics['accuracy']:.3f}")
+            sys.stdout.flush()
+
+        model.load_state_dict(best_state)
+        test_loss, test_metrics = evaluate(model, loaders["test"], criterion, device)
+
+    return {
+        "config": cfg,
+        "config_name": config_name(cfg),
+        "fold": fold,
+        "best_epoch": best_epoch,
+        "best_val_loss": best_val,
+        "n_parameters": model.n_parameters(),
+        "test_loss": test_loss,
+        **{f"test_{k}": v for k, v in test_metrics.items()},
+        "n_test_tiles": len(test_df),
+        "n_test_lakes": int(test_df["lake_id"].nunique()),
+    }
+
+
+def summarize(out_dir: Path):
+    rows = [json.loads(p.read_text()) for p in sorted(out_dir.glob("*.json"))]
+    if not rows:
+        print(f"no result JSONs in {out_dir}")
+        return
+    df = pd.DataFrame(rows)
+    agg = (df.groupby("config_name")
+             .agg(folds=("fold", "count"),
+                  acc_mean=("test_accuracy", "mean"),
+                  acc_std=("test_accuracy", "std"),
+                  f1_mean=("test_f1", "mean"),
+                  auc_mean=("test_auc", "mean"),
+                  params=("n_parameters", "first"))
+             .sort_values("acc_mean", ascending=False))
+    pd.set_option("display.width", 160)
+    print(agg.to_string(float_format=lambda x: f"{x:.4f}"))
+    out = out_dir / "summary.csv"
+    agg.to_csv(out)
+    print(f"\nWrote {out}")
+
+
+def main():
+    p = argparse.ArgumentParser(description="Lake-grouped CV over a config grid")
+    p.add_argument("--labels_csv", type=str, default="labels/labels.csv")
+    p.add_argument("--nc_dir", type=str, default=None,
+                   help="Directory of per-tile .nc files")
+    p.add_argument("--band_stats", type=str, default=None)
+    p.add_argument("--out_dir", type=str, required=True)
+    p.add_argument("--config_index", type=int, default=-1,
+                   help=f"0..{len(GRID)-1} for one config (SLURM array), "
+                        f"-1 for all sequentially")
+    p.add_argument("--folds", type=int, default=3,
+                   help="Lake-grouped folds per config (default 3 for the "
+                        "grid; rerun the winner at 5)")
+    p.add_argument("--epochs", type=int, default=40)
+    p.add_argument("--batch_size", type=int, default=32)
+    p.add_argument("--img_size", type=int, default=256,
+                   help="GAP head is size-agnostic; 256 makes the grid ~4x "
+                        "cheaper than 512")
+    p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--num_workers", type=int, default=4)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--summarize", action="store_true")
+    args = p.parse_args()
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.summarize:
+        summarize(out_dir)
+        return
+
+    if args.nc_dir is None:
+        p.error("--nc_dir is required unless --summarize")
+
+    from cloudytile.splits import lake_group_kfold
+
+    configs = GRID if args.config_index < 0 else [GRID[args.config_index]]
+    print(f"{len(GRID)} configs in grid; running {len(configs)} "
+          f"x {args.folds} folds at {args.img_size}px")
+
+    # Folds are a function of (labels, folds, seed) only — identical for every
+    # config, which is what makes config scores comparable.
+    folds = list(lake_group_kfold(args.labels_csv, n_splits=args.folds,
+                                  seed=args.seed))
+
+    for cfg in configs:
+        for fold, train_df, test_df in folds:
+            out_path = out_dir / f"{config_name(cfg)}_fold{fold}.json"
+            if out_path.exists():
+                print(f"skip existing {out_path.name}")
+                continue
+            result = run_one(cfg, fold, train_df, test_df, args)
+            tmp = out_path.parent / f".{out_path.name}.tmp"
+            tmp.write_text(json.dumps(result, indent=2))
+            tmp.rename(out_path)
+            print(f"wrote {out_path.name}: acc={result['test_accuracy']:.4f}")
+
+
+if __name__ == "__main__":
+    main()

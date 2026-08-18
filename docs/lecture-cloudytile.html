@@ -409,9 +409,11 @@ dense layer removes the resolution dependence entirely &mdash; the model also st
 size the input image is.</figcaption>
 </figure>
 <p>
-The planned architecture revision replaces flatten with GAP and adds batch normalization after
-each conv, dropout before the final layer, and flip/rotation augmentation (satellite tiles have
-no canonical orientation, so this is a free 8&times; on the data).
+This is the current default: <code>CloudyTileCNN</code> ships with the GAP head, batch
+normalization after each conv, dropout before the final layer, and flip/rotation augmentation at
+train time (satellite tiles have no canonical orientation, so those are exact symmetries of the
+task). The flatten head survives only to load pre-August-2026 checkpoints
+(<code>head="flatten", batch_norm=False, dropout=0.0</code>).
 </p>
 
 <h2>6. Baselines any model must beat</h2>
@@ -433,17 +435,22 @@ usability and in 2019 actually ran backwards against human judgment.
 
 <h2>7. Running it</h2>
 <h3>Extract frames for labeling (Sherlock)</h3>
-<pre><code>sbatch engine/preprocessing/extract_label_frames.sh
+<pre><code>sbatch slurm/extract_label_frames.sh
 # 200 lakes x 25 frames per year from the SDR deposit, &lt;50% NaN, seeded</code></pre>
 <h3>Label (local browser GUI)</h3>
-<pre><code>python3 engine/labeling/label_gui.py --image_dir data/label_frames_2019
+<pre><code>python3 engine/label_gui.py --image_dir data/label_frames_2019
 # left arrow = 0 not useful | right arrow = 1 useful
 # backspace = back one frame | space = forward | h = help with examples
 # writes labels/labels.csv atomically after every keypress; resume is automatic</code></pre>
-<h3>Train</h3>
-<pre><code>python3 engine/training/run_training.py \
+<h3>Extract training tiles and train (Sherlock)</h3>
+<pre><code># JPGs are for labeling only; training reads per-tile 6-band .nc
+sbatch slurm/extract_training_nc.sh
+sbatch slurm/compute_band_stats.sh
+
+python3 engine/run_training.py \
     --labels_csv labels/labels.csv \
-    --image_dir data/label_frames_all \
+    --nc_dir /oak/.../data/cloudytile/training_nc_10k \
+    --band_stats /oak/.../data/cloudytile/band_stats_10k.json \
     --optimize_metric loss --save_path best_model.pth
 # splits by lake by default; test metrics are computed on the restored
 # best-validation checkpoint, i.e. the same weights written to --save_path</code></pre>

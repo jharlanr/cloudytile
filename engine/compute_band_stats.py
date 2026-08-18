@@ -58,11 +58,11 @@ def compute_band_stats(
 
     print(f"Channels: {channels}")
 
-    # Accumulate statistics using Welford's online algorithm
-    # This avoids loading all data into memory
+    # Accumulate per-file moments in float64, NaNs excluded. (A per-pixel
+    # Python Welford loop is numerically nicer but takes days at 10k tiles.)
     n_pixels = {ch: 0 for ch in channels}
-    mean = {ch: 0.0 for ch in channels}
-    M2 = {ch: 0.0 for ch in channels}  # Sum of squared differences
+    total = {ch: 0.0 for ch in channels}
+    total_sq = {ch: 0.0 for ch in channels}
 
     for i, nc_path in enumerate(nc_files):
         if (i + 1) % 100 == 0:
@@ -71,20 +71,13 @@ def compute_band_stats(
         try:
             with xr.open_dataset(nc_path) as ds:
                 for ch in channels:
-                    data = ds["imagery"].sel(channel=ch).values.flatten()
-                    # Remove NaNs
+                    data = ds["imagery"].sel(channel=ch).values.astype(np.float64)
                     data = data[~np.isnan(data)]
-
                     if len(data) == 0:
                         continue
-
-                    # Welford's online algorithm for mean and variance
-                    for x in data:
-                        n_pixels[ch] += 1
-                        delta = x - mean[ch]
-                        mean[ch] += delta / n_pixels[ch]
-                        delta2 = x - mean[ch]
-                        M2[ch] += delta * delta2
+                    n_pixels[ch] += data.size
+                    total[ch] += data.sum()
+                    total_sq[ch] += np.square(data).sum()
 
         except Exception as e:
             print(f"  Warning: Error processing {nc_path.name}: {e}")
@@ -94,14 +87,15 @@ def compute_band_stats(
     stats = {}
     for ch in channels:
         if n_pixels[ch] > 1:
-            variance = M2[ch] / (n_pixels[ch] - 1)
-            std = np.sqrt(variance)
+            mean_ch = total[ch] / n_pixels[ch]
+            variance = (total_sq[ch] - n_pixels[ch] * mean_ch**2) / (n_pixels[ch] - 1)
+            std = np.sqrt(max(variance, 0.0))
             stats[ch] = {
-                "mean": float(mean[ch]),
+                "mean": float(mean_ch),
                 "std": float(std),
                 "n_pixels": int(n_pixels[ch]),
             }
-            print(f"  {ch:12s}: mean={mean[ch]:10.2f}, std={std:10.2f}")
+            print(f"  {ch:12s}: mean={mean_ch:10.2f}, std={std:10.2f}")
         else:
             print(f"  {ch:12s}: insufficient data")
 
