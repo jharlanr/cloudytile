@@ -85,46 +85,59 @@ of the task, for humans and for the model.
 
 <h2>2. The pipeline</h2>
 <figure>
-<svg viewBox="0 0 1120 150" role="img" aria-label="Pipeline: SDR NetCDF timestacks are sampled into JPG frames, labeled in the browser GUI into labels.csv, used to train CloudyTileCNN weights, which produce cloudy_seq_rgb consumed by lake-vision.">
+<svg viewBox="0 0 1180 270" role="img" aria-label="The SDR timestacks feed two separate paths. The upper path renders 10,000 RGB JPG frames for a human to label into labels.csv. The lower path uses labels.csv to cut 10,000 six-band NetCDF tiles, which train CloudyTileCNN; its weights produce cloudy_seq_rgb, consumed by lake-vision. JPGs never enter the model.">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
     </marker>
   </defs>
   <g fill="none" stroke="currentColor" stroke-width="1.3">
-    <rect x="10"  y="45" width="150" height="58" rx="8"/>
-    <rect x="204" y="45" width="150" height="58" rx="8"/>
-    <rect x="398" y="45" width="150" height="58" rx="8"/>
-    <rect x="592" y="45" width="150" height="58" rx="8"/>
-    <rect x="786" y="45" width="150" height="58" rx="8"/>
-    <rect x="980" y="45" width="130" height="58" rx="8" stroke="var(--accent)"/>
+    <rect x="10"   y="100" width="140" height="58" rx="8"/>
+    <rect x="220"  y="30"  width="140" height="58" rx="8"/>
+    <rect x="430"  y="30"  width="140" height="58" rx="8"/>
+    <rect x="430"  y="170" width="140" height="58" rx="8"/>
+    <rect x="640"  y="170" width="140" height="58" rx="8"/>
+    <rect x="850"  y="170" width="140" height="58" rx="8"/>
+    <rect x="1030" y="170" width="130" height="58" rx="8" stroke="var(--accent)"/>
   </g>
-  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr)">
-    <line x1="160" y1="74" x2="200" y2="74"/>
-    <line x1="354" y1="74" x2="394" y2="74"/>
-    <line x1="548" y1="74" x2="588" y2="74"/>
-    <line x1="742" y1="74" x2="782" y2="74"/>
-    <line x1="936" y1="74" x2="976" y2="74"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#arr)">
+    <path d="M150,118 C 185,118 185,59 216,59"/>
+    <line x1="360" y1="59"  x2="426" y2="59"/>
+    <path d="M150,140 C 250,140 300,199 426,199"/>
+    <line x1="500" y1="88"  x2="500" y2="166"/>
+    <line x1="570" y1="199" x2="636" y2="199"/>
+    <line x1="780" y1="199" x2="846" y2="199"/>
+    <line x1="990" y1="199" x2="1026" y2="199"/>
   </g>
   <g font-size="12.5" fill="currentColor" text-anchor="middle">
-    <text x="85"  y="70">ESSD SDR</text><text x="85"  y="88">.nc timestacks</text>
-    <text x="279" y="70">10,000 JPG</text><text x="279" y="88">frames</text>
-    <text x="473" y="70">labels/</text><text x="473" y="88">labels.csv</text>
-    <text x="667" y="70">CloudyTileCNN</text><text x="667" y="88">weights .pth</text>
-    <text x="861" y="70">cloudy_seq_rgb</text><text x="861" y="88">0/1 per timestep</text>
-    <text x="1045" y="70" fill="var(--accent)">lake-vision</text><text x="1045" y="88" fill="var(--accent)">drainage clf</text>
+    <text x="80"   y="125">ESSD SDR</text><text x="80"   y="143">.nc timestacks</text>
+    <text x="290"  y="55">10,000 JPG</text><text x="290"  y="73">frames (RGB)</text>
+    <text x="500"  y="55">labels/</text><text x="500"  y="73">labels.csv</text>
+    <text x="500"  y="195">10,000 tiles</text><text x="500"  y="213">6-band .nc</text>
+    <text x="710"  y="195">CloudyTileCNN</text><text x="710"  y="213">weights .pth</text>
+    <text x="920"  y="195">cloudy_seq_rgb</text><text x="920"  y="213">0/1 per timestep</text>
+    <text x="1095" y="195" fill="var(--accent)">lake-vision</text><text x="1095" y="213" fill="var(--accent)">drainage clf</text>
   </g>
   <g font-size="10.5" fill="currentColor" opacity="0.75" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">
-    <text x="180" y="36">extract_label_frames.py</text>
-    <text x="374" y="36">label_gui.py</text>
-    <text x="568" y="36">run_training.py</text>
-    <text x="762" y="36">inference.py</text>
-    <text x="956" y="36">consumed by</text>
+    <text x="196" y="22">extract_label_frames.py</text>
+    <text x="393" y="50">label_gui.py</text>
+    <text x="265" y="207">extract_training_nc.py</text>
+    <text x="603" y="191">run_training.py</text>
+    <text x="813" y="191">inference.py</text>
+    <text x="1008" y="191">feeds</text>
+  </g>
+  <text x="512" y="133" font-size="10.5" fill="currentColor" opacity="0.75" font-family="ui-monospace, Menlo, monospace">which frames</text>
+  <g font-size="11.5" fill="currentColor" opacity="0.6">
+    <text x="605" y="52">JPGs are for</text>
+    <text x="605" y="70">human eyes only</text>
   </g>
 </svg>
-<figcaption>The full path from raw imagery to lake-vision. Everything left of the weights is
-data preparation done once per labeling campaign; everything right of it runs over the full
-2018&ndash;2019 CW lake archive.</figcaption>
+<figcaption>The SDR timestacks are read twice, for two different purposes. The upper path exists
+only so a human can see the frames; it terminates at <code>labels.csv</code> and the JPGs are
+never fed to the network. The lower path re-cuts those same frames from the source NetCDF with
+all six bands intact &mdash; that is what training and inference actually read. At inference the
+SDR is read a third time, now over every lake in the 2018&ndash;2019 CW archive rather than the
+400 sampled ones.</figcaption>
 </figure>
 
 <p>Source imagery is the published <strong>ESSD SDR deposit</strong> on OAK
@@ -136,14 +149,40 @@ the ESSD work &mdash; cloudy-tile keeps its own labels and its own splits.</p>
 <p>Two conventions hold the pipeline together. Break either and things fail silently.</p>
 <table>
 <tr><th>contract</th><th>form</th><th>example</th></tr>
-<tr><td>frame filename</td><td><code>{lake_id}_t{timestep:03d}.jpg</code></td><td><code>CW2019_1530_t006.jpg</code></td></tr>
+<tr><td>frame key</td><td><code>{lake_id}_t{timestep:03d}</code></td><td><code>CW2019_1530_t006</code></td></tr>
+<tr><td>labeling frame</td><td>frame key + <code>.jpg</code>, true-colour RGB</td><td><code>CW2019_1530_t006.jpg</code></td></tr>
+<tr><td>training tile</td><td>frame key + <code>.nc</code>, six float32 bands</td><td><code>CW2019_1530_t006.nc</code></td></tr>
 <tr><td>labels CSV</td><td>columns <code>filename,label</code>; filename unique</td><td><code>CW2019_1530_t006.jpg,0</code></td></tr>
 </table>
 <p>
 The polarity is load-bearing: <strong>0 = not useful, 1 = useful</strong>. It matches
-<code>CloudyTileDataset</code>'s docstring and the <code>cloudy_seq</code> attributes written at
+<code>CloudyTileDatasetNC</code>'s docstring and the <code>cloudy_seq</code> attributes written at
 inference. The lake id is recoverable from any filename by splitting on the final
 <code>_t</code> &mdash; that single fact is what makes lake-grouped splitting possible.
+</p>
+
+<h3>What a training tile contains</h3>
+<p>
+Each <code>.nc</code> tile carries all six SDR bands &mdash; <code>red</code>,
+<code>green</code>, <code>blue</code>, <code>nir</code>, <code>swir16</code>,
+<code>swir22</code> &mdash; as float32 surface-reflectance digital numbers, with
+<code>NaN</code> marking no-data. Which of the six a run actually uses is a training-time choice
+(<code>--nc_channels</code>), which is what makes the band question in the config grid answerable
+without re-extracting anything.
+</p>
+<p>
+Normalization happens in a specific order, and the order is the whole point:
+</p>
+<pre><code>nan_mask = np.isnan(imagery)
+imagery = (imagery - band_mean) / band_std   # per-band, from band_stats.json
+imagery[nan_mask] = 0.0                      # exactly 0.0, in NORMALIZED space</code></pre>
+<p>
+Per-band statistics matter because the bands are not on remotely the same scale: the visible
+bands average ~8,000&nbsp;DN with a coefficient of variation near 0.23, while SWIR averages
+~1,350 with a CV above 1.0. Setting no-data to zero <em>after</em> normalizing puts it at the
+mean of each band &mdash; the least informative value available. Doing it in the other order (the
+January behaviour) left no-data sitting at roughly &minus;4.5&thinsp;&sigma;, an extreme value the
+network could trivially key on, and one that correlates with the label.
 </p>
 
 <h3>The current dataset (August 2026)</h3>
@@ -252,18 +291,49 @@ out whole lakes, so test frames come from lakes the model has never seen.</figca
 </figure>
 <p>
 <code>cloudytile/splits.py</code> implements this: <code>create_lake_splits</code> for a single
-80/10/10 partition (320/40/40 lakes on the current data), <code>lake_group_kfold</code> for
-stratified 5-fold CV (80 held-out lakes per fold), and <code>assert_lake_disjoint</code> as a
-guard. <code>run_training.py</code> defaults to <code>--split_by lake</code>; the legacy
+lake-disjoint partition, <code>lake_group_kfold</code> for stratified grouped CV, and
+<code>assert_lake_disjoint</code> as a guard that is called, not merely available.
+<code>run_training.py</code> defaults to <code>--split_by lake</code>; the legacy
 <code>--split_by tile</code> survives only to reproduce old runs, and warns.
+</p>
+
+<h3>Freezing the split</h3>
+<p>
+Grouping by lake is necessary but not sufficient. A split derived from a seed silently
+<em>moves</em> whenever <code>labels.csv</code> changes &mdash; add a hundred labels and the test
+lakes are a different set, so no two results are comparable and a lake that was held out last
+week may be training data today. The fix is to compute the split once and commit the lake ids:
+</p>
+<pre><code>splits/cloudytile_v1/
+  train_ids.json   280 lakes
+  val_ids.json      40 lakes
+  test_ids.json     80 lakes
+  split_meta.json</code></pre>
+<p>
+This is a <strong>70 / 10 / 20</strong> partition, matching the ESSD deposit's layout, and it is
+pinned for the life of the project. <code>load_frozen_split</code> raises on a lake it has never
+seen rather than silently dropping it, so a stale split fails loudly instead of quietly shrinking
+the evaluation set.
+</p>
+<p>
+The 280 train and 40 val lakes together form the <strong>320 dev lakes</strong>, and every
+decision &mdash; architecture, bands, learning rate, epoch, decision threshold &mdash; is made
+inside that pool. The 80 test lakes are read exactly once, by the final model.
 </p>
 
 <h2>5. The network</h2>
 <p>
 <code>CloudyTileCNN</code> (<code>cloudytile/model.py</code>) is a deliberately small CNN: three
-conv blocks, each <em>conv 3&times;3 &rarr; ReLU &rarr; maxpool /2</em>, followed by a
-fully-connected head. Input is an RGB frame resized to 512&times;512, values scaled to [0,1];
-output is a single logit (sigmoid &rarr; probability of "useful").
+conv blocks &mdash; each <em>conv 3&times;3 &rarr; BatchNorm &rarr; ReLU &rarr; maxpool /2</em>
+&mdash; then a global-average-pooling head, dropout 0.3, and a single logit
+(sigmoid &rarr; probability of "useful"). Input is a stack of one to six normalized bands.
+Training augments with flips and 90&deg; rotations, which are exact symmetries here: a satellite
+tile has no canonical orientation.
+</p>
+<p>
+None of that was true in January, and the history earns a section because the failure mode is
+both common and silent. The original model took a fixed 512&times;512 RGB frame and flattened
+the last feature block straight into a dense layer:
 </p>
 <figure>
 <svg viewBox="0 0 1120 250" role="img" aria-label="Tensor shapes through the network: 3 by 512 by 512 input shrinks through three conv-pool blocks to 64 by 64 by 64, is flattened to 262,144 values, then a dense layer maps to 128 and to a single logit. The dense layer after flatten holds 33.5 million of the 33.6 million parameters.">
@@ -321,10 +391,11 @@ output is a single logit (sigmoid &rarr; probability of "useful").
   <text x="60" y="40" font-size="12.5" fill="currentColor">input RGB</text>
   <text x="840" y="35" font-size="11.5" text-anchor="middle" fill="var(--danger)">flattened vector</text>
 </svg>
-<figcaption>Tensor shapes through <code>CloudyTileCNN</code> at 512&times;512, RGB, default
-channels [16,&thinsp;32,&thinsp;64], fc [128]. Parameter counts sit under the operation that owns
-them. One dense layer &mdash; <span class="danger-text">262,144&thinsp;&times;&thinsp;128</span>
-&mdash; holds 99.6% of all weights.</figcaption>
+<figcaption>Tensor shapes through the <strong>legacy flatten configuration</strong> at
+512&times;512, RGB, channels [16,&thinsp;32,&thinsp;64], fc [128]. Parameter counts sit under the
+operation that owns them. One dense layer &mdash;
+<span class="danger-text">262,144&thinsp;&times;&thinsp;128</span> &mdash; holds 99.9% of all
+weights.</figcaption>
 </figure>
 
 <h3>Where the 33.5 million parameters come from</h3>
@@ -417,7 +488,7 @@ task). The flatten head survives only to load pre-August-2026 checkpoints
 </p>
 
 <h2>6. Baselines any model must beat</h2>
-<p>Measured on 40 held-out lakes (1,000 frames) of the current dataset:</p>
+<p>On held-out lakes of the current dataset:</p>
 <table>
 <tr><th>baseline</th><th>accuracy</th><th>what it knows</th></tr>
 <tr><td>majority class ("always useful")</td><td class="num">68.4%</td><td>nothing</td></tr>
@@ -432,8 +503,147 @@ the network earns above a <code>stat()</code> call. Scene-level
 <code>eo_cloud_cover</code> metadata, for comparison, is nearly uninformative about per-tile
 usability and in 2019 actually ran backwards against human judgment.
 </p>
+<div class="callout">
+<strong>Caveat on these two numbers.</strong> They were computed ad hoc, before
+<code>splits/cloudytile_v1</code> was frozen, on a held-out set that is <em>not</em> the current
+80 test lakes &mdash; and no script or result file in the repo reproduces them. Comparing a model
+scored on the frozen test lakes against a baseline scored on different lakes is not a like-for-like
+margin. Both baselines should be recomputed on the frozen test lakes, and the result committed,
+before either number is quoted in a paper.
+</div>
 
-<h2>7. Running it</h2>
+<h2>7. Choosing a model without cheating</h2>
+<p>
+Lake-grouping fixes <em>how</em> data is divided. It says nothing about a second leak, which is
+easier to miss: if you train 32 configurations and keep the one that scored best, the winner's
+score is partly a measure of luck, and the data those scores were computed on has been used to
+make a decision. That data is no longer a clean test set &mdash; it is training data for the
+selection step.
+</p>
+<figure>
+<svg viewBox="0 0 960 320" role="img" aria-label="The 400 labeled lakes split into 280 train, 40 validation and 80 test. The 280 and 40 form a 320-lake development pool in which every decision is made; it is divided into three lake-grouped folds, each holding out about 107 lakes. The 80 test lakes sit apart and are read once, by the final model.">
+  <defs>
+    <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.65">
+    <path d="M90,44 L90,34 L730,34 L730,44"/>
+  </g>
+  <text x="410" y="27" font-size="12" fill="currentColor" text-anchor="middle">320 development lakes &mdash; every decision is made in here</text>
+  <rect x="90"  y="52" width="560" height="34" fill="currentColor" opacity="0.22"/>
+  <rect x="650" y="52" width="80"  height="34" fill="currentColor" opacity="0.45"/>
+  <rect x="730" y="52" width="160" height="34" fill="none" stroke="var(--danger)" stroke-width="1.8"/>
+  <g font-size="12" fill="currentColor" text-anchor="middle">
+    <text x="370" y="74">train &mdash; 280 lakes</text>
+    <text x="690" y="74">val 40</text>
+  </g>
+  <text x="810" y="74" font-size="12" fill="var(--danger)" text-anchor="middle" font-weight="600">test &mdash; 80 lakes</text>
+  <line x1="410" y1="92" x2="410" y2="112" stroke="currentColor" stroke-width="1.3" marker-end="url(#arr4)"/>
+  <text x="424" y="107" font-size="11" fill="currentColor" opacity="0.75" font-family="ui-monospace, Menlo, monospace">3 lake-grouped folds &times; 32 configs</text>
+  <g>
+    <rect x="90"  y="122" width="213" height="24" fill="var(--accent)"/>
+    <rect x="303" y="122" width="427" height="24" fill="currentColor" opacity="0.22"/>
+    <rect x="90"  y="156" width="213" height="24" fill="currentColor" opacity="0.22"/>
+    <rect x="303" y="156" width="213" height="24" fill="var(--accent)"/>
+    <rect x="516" y="156" width="214" height="24" fill="currentColor" opacity="0.22"/>
+    <rect x="90"  y="190" width="426" height="24" fill="currentColor" opacity="0.22"/>
+    <rect x="516" y="190" width="214" height="24" fill="var(--accent)"/>
+  </g>
+  <g font-size="11.5" fill="currentColor" text-anchor="end" opacity="0.8">
+    <text x="82" y="139">fold 0</text>
+    <text x="82" y="173">fold 1</text>
+    <text x="82" y="207">fold 2</text>
+  </g>
+  <g font-size="10.5" fill="var(--bg)" text-anchor="middle">
+    <text x="196" y="139">held out</text>
+    <text x="409" y="173">held out</text>
+    <text x="623" y="207">held out</text>
+  </g>
+  <text x="516" y="139" font-size="10.5" fill="currentColor" opacity="0.8" text-anchor="middle">fit (minus a 15% inner-validation slice)</text>
+  <text x="410" y="238" font-size="11" fill="currentColor" opacity="0.75" text-anchor="middle">inner validation picks the epoch and the decision threshold &mdash; never the held-out lakes</text>
+  <g stroke="var(--danger)" stroke-width="1.4" fill="none" stroke-dasharray="5 5" marker-end="url(#arr4)">
+    <line x1="810" y1="92" x2="810" y2="256"/>
+  </g>
+  <rect x="688" y="264" width="244" height="40" rx="8" fill="none" stroke="var(--danger)" stroke-width="1.6"/>
+  <g font-size="11.5" fill="var(--danger)" text-anchor="middle">
+    <text x="810" y="281">winner retrained on all 320,</text>
+    <text x="810" y="297">scored here exactly once</text>
+  </g>
+</svg>
+<figcaption>Model selection lives entirely inside the 320 development lakes. The 80 test lakes are
+untouched by all 96 (config, fold) runs, so the single number they eventually produce has not been
+optimized against.</figcaption>
+</figure>
+
+<h3>The grid</h3>
+<p>
+32 configurations &mdash; 4 band sets (<code>rgb</code>, <code>rgb+nir</code>,
+<code>rgb+swir16</code>, <code>all6</code>) &times; 2 widths &times; 2 learning rates &times; 2
+optimizers &mdash; each scored on 3 identical lake-grouped folds. The folds are a function of
+<code>(labels, n_folds, seed)</code> alone, so two configurations always differ by architecture,
+never by data.
+</p>
+<p>
+The central question is the band question. A January sweep concluded that bands beyond RGB do not
+help, but it was measured on the leaked tile split, where the model could recognize its test
+lakes and any real signal would have been swamped. On a clean split the question is genuinely
+open, and it matters: the band statistics show SWIR varying far more than the visible bands
+(coefficient of variation above 1.0 against roughly 0.23), which is exactly the kind of dynamic
+range that could separate cloud from bright ice.
+</p>
+<p>
+Everything else is held fixed &mdash; GAP head, BatchNorm, dropout 0.3, augmentation, 40 epochs,
+batch 32, and <strong>256&times;256</strong> input. The grid can run at 256 for roughly 4&times;
+the throughput precisely because the GAP head made the model resolution-independent; the winner
+can be re-run at 512 afterwards if resolution turns out to matter.
+</p>
+
+<h3>Reading the table</h3>
+<p>
+Configurations are ranked by <strong>AUC</strong>, not accuracy. Accuracy sits near the 68.4%
+majority rate, which compresses real differences, and it depends on a threshold &mdash; ranking by
+it would compare operating points and models at the same time. AUC is threshold-free.
+</p>
+<p>
+The number that makes the table readable is the <strong>fold-to-fold spread</strong>. Each
+configuration is three numbers, and the standard deviation across them says how much of any
+apparent gap is noise. <code>--summarize</code> prints the ranked table and warns when the gap
+between first and second place is smaller than that spread &mdash; in which case the honest
+reading is a tie, and the rule is to take the simpler configuration rather than the nominal
+winner. A config that wins by less than its own run-to-run variation has not been shown to be
+better than anything.
+</p>
+
+<h3>The operating point</h3>
+<p>
+The dataset is 68.6% useful to 31.4% not useful &mdash; about 2.2:1, which is mild. That does not
+call for focal loss or class weights; plain <code>BCEWithLogitsLoss</code> is correct, and
+<code>StratifiedGroupKFold</code> already keeps label proportions even across folds.
+</p>
+<p>
+What <em>is</em> lopsided is the cost of the two errors:
+</p>
+<table>
+<tr><th>error</th><th>consequence</th></tr>
+<tr><td>false positive (cloudy called useful)</td><td>a bad frame enters lake-vision's timeseries and can corrupt a drainage call</td></tr>
+<tr><td>false negative (clear called cloudy)</td><td>one observation lost from a lake that has ~90 usable ones</td></tr>
+</table>
+<p>
+So precision on the useful class is worth more than recall &mdash; and the lever for that is the
+<strong>decision threshold</strong>, not the loss function. Tuning the threshold on validation
+probabilities keeps one training run yielding the entire precision/recall curve, leaves the
+operating point a single reportable number, and lets it be changed later without retraining
+anything.
+</p>
+<pre><code>--threshold_objective f1                                        # default, balanced
+--threshold_objective target_precision --target_precision 0.97  # cost-asymmetric</code></pre>
+<p>
+The full protocol, including what is deliberately <em>not</em> done (nested CV, cross-year
+evaluation), is in <a href="CROSSVAL.md">docs/CROSSVAL.md</a>.
+</p>
+
+<h2>8. Running it</h2>
 <h3>Extract frames for labeling (Sherlock)</h3>
 <pre><code>sbatch slurm/extract_label_frames.sh
 # 200 lakes x 25 frames per year from the SDR deposit, &lt;50% NaN, seeded</code></pre>
@@ -442,34 +652,58 @@ usability and in 2019 actually ran backwards against human judgment.
 # left arrow = 0 not useful | right arrow = 1 useful
 # backspace = back one frame | space = forward | h = help with examples
 # writes labels/labels.csv atomically after every keypress; resume is automatic</code></pre>
-<h3>Extract training tiles and train (Sherlock)</h3>
+<h3>Freeze the split (once, before any model is fit)</h3>
+<pre><code>python3 engine/make_splits.py --labels_csv labels/labels.csv \
+    --out_dir splits/cloudytile_v1
+# writes train/val/test lake-id JSONs; commit them</code></pre>
+<h3>Extract training tiles (Sherlock)</h3>
 <pre><code># JPGs are for labeling only; training reads per-tile 6-band .nc
 sbatch slurm/extract_training_nc.sh
-sbatch slurm/compute_band_stats.sh
+sbatch slurm/compute_band_stats.sh</code></pre>
+<h3>Select a configuration (Sherlock)</h3>
+<pre><code>sbatch slurm/run_cv_grid.sh          # 32 array tasks, 4 concurrent GPUs
+python3 engine/run_cv_grid.py --out_dir &lt;results&gt; --summarize
+# --split_dir restricts folds to the 320 dev lakes, so selection
+# never sees the 80 test lakes. Each (config, fold) writes one JSON
+# and existing ones are skipped, so a timed-out array can be resubmitted.
 
-python3 engine/run_training.py \
+wandb sync &lt;wandb_dir&gt;/offline-run-*    # from a LOGIN node; compute nodes have no internet</code></pre>
+<h3>Train the final model (Sherlock)</h3>
+<pre><code>python3 engine/run_training.py \
     --labels_csv labels/labels.csv \
+    --split_dir splits/cloudytile_v1 \
     --nc_dir /oak/.../data/cloudytile/training_nc_10k \
     --band_stats /oak/.../data/cloudytile/band_stats_10k.json \
+    --nc_channels red green blue nir \
     --optimize_metric loss --save_path best_model.pth
-# splits by lake by default; test metrics are computed on the restored
-# best-validation checkpoint, i.e. the same weights written to --save_path</code></pre>
+# the only run that touches the 80 test lakes. Test metrics are computed on the
+# restored best-validation checkpoint -- the same weights written to --save_path --
+# at a threshold chosen on the validation lakes.</code></pre>
 <h3>Inference over the lake archive</h3>
 <pre><code>from cloudytile.inference import process_directory
 process_directory(nc_dir=..., model_path="best_model.pth",
-                  nc_channels=["red","green","blue"],
+                  nc_channels=["red","green","blue","nir"],
                   var_name="cloudy_seq_rgb", output_dir=...)</code></pre>
 
-<h2>8. Lessons encoded in this repo</h2>
+<h2>9. Lessons encoded in this repo</h2>
 <ul>
 <li><strong>Split by group, not by sample</strong>, whenever samples are correlated &mdash; here,
 frames of the same lake. The guard is one assert; the silent version of the bug costs months.</li>
+<li><strong>Freeze the split, don't seed it.</strong> A seed-derived split moves every time the
+label file grows, so results drift apart for reasons nobody is tracking. Commit the ids.</li>
+<li><strong>Selection is training.</strong> Picking the best of 32 configurations consumes the
+data you picked on. Keep a holdout that no comparison ever touches.</li>
 <li><strong>Report the dumb baseline.</strong> A file-size threshold scored 88% on the old
-dataset; nobody knew because nobody computed it.</li>
-<li><strong>Metrics must describe the artifact.</strong> Training now restores the best
-checkpoint before the test pass, so the printed numbers describe the saved weights.</li>
+dataset; nobody knew because nobody computed it. Then compute it on the <em>same</em> holdout as
+the model, or the margin means nothing.</li>
+<li><strong>A win smaller than the noise is not a win.</strong> Report the fold-to-fold spread
+next to the mean, and prefer the simpler model inside it.</li>
+<li><strong>Metrics must describe the artifact.</strong> Training restores the best checkpoint
+before the test pass, so the printed numbers describe the saved weights.</li>
 <li><strong>Parameter counts hide in dense layers.</strong> Print them per layer once per
 architecture change; a flatten head scales with image area, not intent.</li>
+<li><strong>Order matters in preprocessing.</strong> Normalize, then fill no-data &mdash; the
+other order encodes "missing" as an extreme value that correlates with the label.</li>
 <li><strong>Label many groups shallowly</strong> rather than few groups deeply: 400 lakes
 &times; 25 frames beats 60 lakes &times; 35 frames at the same labeling cost.</li>
 </ul>
