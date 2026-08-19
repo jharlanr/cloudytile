@@ -23,6 +23,9 @@
 # One config per array task. Resumable: rerun the same sbatch and finished
 # (config, fold) JSONs are skipped. Aggregate afterwards from a login node:
 #   python3 engine/run_cv_grid.py --out_dir <OUT_DIR> --summarize
+#
+# Sync wandb runs from a LOGIN node once the array finishes:
+#   wandb sync /oak/.../sherlock_cloudytile/wandb/offline-run-*
 # Then rerun the winning config at --folds 5 for the reported number.
 # =============================================================================
 
@@ -37,6 +40,10 @@ ml py-scikit-learn/1.5.1_py312
 
 pip install --user xarray netcdf4
 export PYTHONUNBUFFERED=1
+
+# Compute nodes have no internet; wandb buffers to disk and is synced later
+export WANDB_MODE=offline
+export WANDB_DIR="/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile"
 
 REPO_DIR="/oak/stanford/groups/cyaolai/JoshRines/repos/cloudy-tile"
 NC_DIR="/oak/stanford/groups/cyaolai/JoshRines/data/cloudytile/training_nc_10k"
@@ -57,4 +64,5 @@ python3 "$REPO_DIR/engine/run_cv_grid.py" \
     --folds 3 \
     --epochs 40 \
     --img_size 256 \
-    --num_workers 8
+    --num_workers 8 \
+    --wandb_project cloudy-tile-cv

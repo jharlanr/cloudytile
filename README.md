@@ -7,7 +7,8 @@ over bright ice. Its per-timestep predictions (`cloudy_seq_rgb`) feed the downst
 [YaoGroup/lake-vision](https://github.com/YaoGroup/lake-vision) drainage classifier.
 
 New here? Read **[docs/lecture-cloudytile.html](docs/lecture-cloudytile.html)** — a pedagogical
-walkthrough of the pipeline, the dataset, and the architecture.
+walkthrough of the pipeline, the dataset, and the architecture. For the evaluation protocol
+(splits, the config grid, baselines, wandb), see **[docs/CROSSVAL.md](docs/CROSSVAL.md)**.
 
 ## Tile Examples
 <table>
@@ -51,7 +52,8 @@ cloudy-tile/
 ├── labels/
 │   ├── labels.csv               # Current campaign: 10,000 frames, 400 lakes
 │   └── labels_deprecated.csv    # Retired Labelbox export (do not merge)
-└── docs/                        # Lecture + (gitignored) claudiary
+├── splits/cloudytile_v1/        # Frozen lake-ID split (committed)
+└── docs/                        # lecture-cloudytile.html, CROSSVAL.md, claudiary/
 ```
 
 ## The Pipeline
@@ -98,6 +100,8 @@ cloudy-tile/
    sbatch slurm/run_cv_grid.sh
    python3 engine/run_cv_grid.py --out_dir <results> --summarize
    ```
+   Each (config, fold) is a wandb run grouped by config; sync offline runs from a login node.
+   Full protocol and rationale: **[docs/CROSSVAL.md](docs/CROSSVAL.md)**.
 7. **Inference** over the lake archive:
    ```bash
    python3 engine/run_inference.py --model best_model.pth --input /path/to/nc_dir

@@ -42,6 +42,12 @@ import pandas as pd
 # add repo root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 BAND_SETS = {
     "rgb": ["red", "green", "blue"],
     "rgb+nir": ["red", "green", "blue", "nir"],
@@ -65,9 +71,15 @@ def config_name(cfg: dict) -> str:
 def split_off_val_lakes(train_df: pd.DataFrame, seed: int, val_frac: float = 0.15):
     """Hold out whole lakes from a fold's training set for checkpoint selection."""
     lakes = np.sort(train_df["lake_id"].unique())
+    if len(lakes) < 2:
+        raise ValueError(
+            f"fold has {len(lakes)} training lake(s); need >=2 to hold one out "
+            f"for checkpoint selection. Use fewer folds or more lakes."
+        )
     rng = np.random.default_rng(seed)
     shuffled = rng.permutation(lakes)
-    n_val = max(1, int(round(len(shuffled) * val_frac)))
+    # never consume the whole training set
+    n_val = min(max(1, int(round(len(shuffled) * val_frac))), len(shuffled) - 1)
     val_lakes = set(shuffled[:n_val])
     val_df = train_df[train_df["lake_id"].isin(val_lakes)].reset_index(drop=True)
     tr_df = train_df[~train_df["lake_id"].isin(val_lakes)].reset_index(drop=True)
@@ -82,10 +94,29 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
     from cloudytile.data import CloudyTileDatasetNC
     from cloudytile.model import CloudyTileCNN
     from cloudytile.splits import assert_lake_disjoint
-    from cloudytile.training import train_one_epoch, evaluate
+    from cloudytile.training import (evaluate, pick_threshold, predict_probs,
+                                     train_one_epoch)
 
     torch.manual_seed(args.seed + fold)
     np.random.seed(args.seed + fold)
+
+    # One wandb run per (config, fold), grouped by config so the UI averages
+    # folds natively. Compute nodes have no internet: WANDB_MODE=offline is set
+    # by the SLURM wrapper, and runs are synced from a login node afterwards.
+    run = None
+    if WANDB_AVAILABLE and args.wandb_project:
+        run = wandb.init(
+            project=args.wandb_project,
+            name=f"{config_name(cfg)}_fold{fold}",
+            group=config_name(cfg),
+            job_type="cv",
+            tags=[cfg["bands"], cfg["arch"], cfg["optimizer"], f"fold{fold}"],
+            config={**cfg, "fold": fold, "img_size": args.img_size,
+                    "epochs": args.epochs, "batch_size": args.batch_size,
+                    "weight_decay": args.weight_decay, "seed": args.seed,
+                    "n_bands": len(BAND_SETS[cfg["bands"]])},
+            reinit=True,
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     channels = BAND_SETS[cfg["bands"]]
@@ -140,22 +171,43 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                   f"train {train_loss:.4f} val {val_loss:.4f} "
                   f"acc {val_metrics['accuracy']:.3f}")
             sys.stdout.flush()
+            if run is not None:
+                wandb.log({"epoch": epoch + 1, "train_loss": train_loss,
+                           "val_loss": val_loss,
+                           **{f"val_{k}": v for k, v in val_metrics.items()}})
 
+        # Score the checkpoint that would actually be shipped, at an operating
+        # point chosen on this fold's validation lakes (never on its test lakes).
         model.load_state_dict(best_state)
-        test_loss, test_metrics = evaluate(model, loaders["test"], criterion, device)
+        _, val_labels, val_probs = predict_probs(model, loaders["val"],
+                                                 criterion, device)
+        threshold, _ = pick_threshold(val_labels, val_probs,
+                                      objective=args.threshold_objective,
+                                      target_precision=args.target_precision)
+        test_loss, test_metrics = evaluate(model, loaders["test"], criterion,
+                                           device, threshold=threshold)
 
-    return {
+    result = {
         "config": cfg,
         "config_name": config_name(cfg),
         "fold": fold,
         "best_epoch": best_epoch,
         "best_val_loss": best_val,
+        "threshold": threshold,
         "n_parameters": model.n_parameters(),
         "test_loss": test_loss,
         **{f"test_{k}": v for k, v in test_metrics.items()},
         "n_test_tiles": len(test_df),
         "n_test_lakes": int(test_df["lake_id"].nunique()),
     }
+
+    if run is not None:
+        for k, v in result.items():
+            if isinstance(v, (int, float)):
+                wandb.summary[k] = v
+        wandb.finish()
+
+    return result
 
 
 def summarize(out_dir: Path):
@@ -164,19 +216,36 @@ def summarize(out_dir: Path):
         print(f"no result JSONs in {out_dir}")
         return
     df = pd.DataFrame(rows)
+    # Ranked by AUC: it is threshold-free, so it compares configs without also
+    # comparing whatever operating point each fold happened to choose. Accuracy
+    # is reported alongside but sits close to the 68% majority rate.
     agg = (df.groupby("config_name")
              .agg(folds=("fold", "count"),
+                  auc_mean=("test_auc", "mean"),
+                  auc_std=("test_auc", "std"),
                   acc_mean=("test_accuracy", "mean"),
                   acc_std=("test_accuracy", "std"),
+                  prec_mean=("test_precision", "mean"),
+                  rec_mean=("test_recall", "mean"),
                   f1_mean=("test_f1", "mean"),
-                  auc_mean=("test_auc", "mean"),
                   params=("n_parameters", "first"))
-             .sort_values("acc_mean", ascending=False))
-    pd.set_option("display.width", 160)
+             .sort_values("auc_mean", ascending=False))
+    pd.set_option("display.width", 200)
     print(agg.to_string(float_format=lambda x: f"{x:.4f}"))
     out = out_dir / "summary.csv"
     agg.to_csv(out)
     print(f"\nWrote {out}")
+
+    if len(agg) > 1:
+        top, second = agg.iloc[0], agg.iloc[1]
+        gap = top["auc_mean"] - second["auc_mean"]
+        spread = float(top["auc_std"]) if pd.notna(top["auc_std"]) else 0.0
+        print(f"\nTop: {agg.index[0]} (AUC {top['auc_mean']:.4f} "
+              f"+/- {spread:.4f} across folds)")
+        if gap < spread:
+            print(f"  NOTE: the gap to #2 ({gap:.4f}) is smaller than the "
+                  f"fold-to-fold spread — treat the ranking as a tie and "
+                  f"prefer the simpler config.")
 
 
 def main():
@@ -205,7 +274,19 @@ def main():
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--summarize", action="store_true")
+    p.add_argument("--wandb_project", type=str, default="cloudy-tile-cv",
+                   help="wandb project; one run per (config, fold), grouped by "
+                        "config. Set --no_wandb to disable.")
+    p.add_argument("--no_wandb", action="store_true")
+    p.add_argument("--threshold_objective", type=str, default="f1",
+                   choices=["f1", "target_precision"])
+    p.add_argument("--target_precision", type=float, default=0.95)
     args = p.parse_args()
+    if args.no_wandb:
+        args.wandb_project = None
+    elif not WANDB_AVAILABLE:
+        print("wandb not installed; results still written as JSON")
+        args.wandb_project = None
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
