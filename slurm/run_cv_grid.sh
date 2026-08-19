@@ -10,7 +10,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH -C GPU_SKU:A100_SXM4
-#SBATCH --array=0-31%8
+#SBATCH --array=0-31%4
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jrines@stanford.edu
 
@@ -19,6 +19,8 @@
 #
 # Folds are drawn from the frozen split's train+val lakes only; the 80 test
 # lakes are never seen during selection.
+#
+# Capped at 4 concurrent GPUs (%4) to stay within the serc partition norm.
 #
 # One config per array task. Resumable: rerun the same sbatch and finished
 # (config, fold) JSONs are skipped. Aggregate afterwards from a login node:
