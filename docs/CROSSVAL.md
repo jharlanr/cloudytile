@@ -26,8 +26,9 @@ How `cloudy-tile` picks a model, why the protocol is shaped this way, and how to
 Three rules hold everywhere, and each exists because it was violated once:
 
 1. **Group by lake, never by tile.** Frames of one lake days apart are near-duplicates. The
-   original 80/10/10 tile split put all 52 test lakes into training as well, so the reported
-   ~95% measured recall of memorized lakes.
+   original 80/10/10 tile split put every test lake into training as well, so the reported
+   ~95% measured recall of memorized lakes. Across seeds the test tiles touch 56–60 of the
+   60 lakes and the leak rate is 100% every time — with ~35 frames per lake it cannot not leak.
 2. **Freeze the split.** A seed-derived split silently moves whenever `labels.csv` changes.
    `splits/cloudytile_v1/` pins the test lakes for the life of the project.
 3. **Selection never sees test.** Picking the best of 32 configs by their fold scores is
@@ -43,7 +44,7 @@ Three rules hold everywhere, and each exists because it was violated once:
 | axis | values | why |
 |---|---|---|
 | `bands` | `rgb`, `rgb+nir`, `rgb+swir16`, `all6` | Does spectral information beyond RGB help? The January sweep said no, but it was measured on a leaked split, so the question is genuinely open. |
-| `arch` | `small` = [16,32,64], `wide` = [32,64,128] | With the GAP head both are ~32k and ~130k params — cheap to test whether capacity binds. |
+| `arch` | `small` = [16,32,64], `wide` = [32,64,128] | With the GAP head these are 32,257 and 110,337 params (3-band) — cheap to test whether capacity binds. |
 | `lr` | `1e-3`, `3e-4` | The dominant hyperparameter for Adam-family optimizers at this scale. |
 | `optimizer` | `adam`, `adamw` | AdamW's decoupled weight decay pairs better with BatchNorm; expect a small or null difference. |
 
@@ -103,7 +104,7 @@ changed later without retraining.
 Configs are ranked by **AUC**, deliberately:
 
 - AUC is threshold-free, so it compares models without also comparing operating points.
-- Accuracy sits near the 68.4% majority rate, which compresses differences.
+- Accuracy sits near the 67.5% majority rate, which compresses differences.
 - An 80-lake holdout's own positive rate varies ±2.6 points (2σ) across draws, so accuracy
   differences of a couple of points are noise.
 
@@ -111,11 +112,11 @@ Always quote against the baselines, not against chance:
 
 | baseline | accuracy |
 |---|---|
-| majority class ("always useful") | 68.4% |
-| JPG file-size threshold | 82.5% |
+| majority class ("always useful") | 67.5% |
+| JPG file-size threshold | 82.2% |
 
 The file-size baseline is a `stat()` call with one threshold — it exploits the fact that clear ice
-compresses poorly and cloud compresses well. **A model beating 68% but not 82.5% has learned
+compresses poorly and cloud compresses well. **A model beating 68% but not 82.2% has learned
 nothing that JPEG did not already know.**
 
 `--summarize` prints the ranked table and warns when the gap to second place is smaller than the
@@ -134,7 +135,7 @@ python3 engine/make_splits.py --labels_csv labels/labels.csv \
 sbatch slurm/extract_training_nc.sh
 sbatch slurm/compute_band_stats.sh
 
-# 2. the grid: 32 array tasks, 8 concurrent, ~16-25 A100-hours total
+# 2. the grid: 32 array tasks, 4 concurrent, ~14 A100-hours (measured: 24.0 s/epoch)
 sbatch slurm/run_cv_grid.sh
 
 # 3. aggregate (login node)

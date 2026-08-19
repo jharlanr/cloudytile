@@ -146,7 +146,8 @@ timesteps each, six Sentinel-2 bands as raw L2A digital numbers). Only the image
 the ESSD work &mdash; cloudy-tile keeps its own labels and its own splits.</p>
 
 <h2>3. Data contracts</h2>
-<p>Two conventions hold the pipeline together. Break either and things fail silently.</p>
+<p>A handful of conventions hold the pipeline together. Break any of them and things fail
+silently.</p>
 <table>
 <tr><th>contract</th><th>form</th><th>example</th></tr>
 <tr><td>frame key</td><td><code>{lake_id}_t{timestep:03d}</code></td><td><code>CW2019_1530_t006</code></td></tr>
@@ -178,11 +179,18 @@ imagery = (imagery - band_mean) / band_std   # per-band, from band_stats.json
 imagery[nan_mask] = 0.0                      # exactly 0.0, in NORMALIZED space</code></pre>
 <p>
 Per-band statistics matter because the bands are not on remotely the same scale: the visible
-bands average ~8,000&nbsp;DN with a coefficient of variation near 0.23, while SWIR averages
-~1,350 with a CV above 1.0. Setting no-data to zero <em>after</em> normalizing puts it at the
-mean of each band &mdash; the least informative value available. Doing it in the other order (the
-January behaviour) left no-data sitting at roughly &minus;4.5&thinsp;&sigma;, an extreme value the
-network could trivially key on, and one that correlates with the label.
+bands average ~8,000&nbsp;DN with a coefficient of variation of 0.20&ndash;0.23, while SWIR
+averages ~1,350 with a CV above 1.0. Setting no-data to zero <em>after</em> normalizing puts it
+at the mean of each band &mdash; the least informative value available.
+</p>
+<p>
+Doing it in the other order &mdash; the January behaviour &mdash; is what makes this more than
+bookkeeping. A raw 0&nbsp;DN normalizes to &minus;4.4&thinsp;&sigma; in red,
+&minus;4.9&thinsp;&sigma; in green and &minus;5.1&thinsp;&sigma; in blue: an extreme, perfectly
+constant value marking exactly the pixels that carry no information. Since no-data fraction
+correlates with the label, that hands the network a shortcut feature it can key on instead of
+learning cloud from ice. (Note the shortcut is far weaker in SWIR, where 0&nbsp;DN lands at only
+&minus;0.9&thinsp;&sigma; &mdash; another consequence of that band's much wider spread.)
 </p>
 
 <h3>The current dataset (August 2026)</h3>
@@ -207,8 +215,11 @@ it labels a different frame population.
 Two frames of the same lake a few days apart are near-duplicate images. A split drawn at the
 <em>tile</em> level therefore puts almost every lake on both sides of the line: the model meets
 the test lakes during training and the test score measures recognition, not generalization. This
-is not hypothetical &mdash; the original tile split of the deprecated dataset put
-<strong>all 52 test lakes in the training set too</strong>.
+is not hypothetical &mdash; under the original tile split of the deprecated dataset,
+<strong>every single test lake appeared in the training set too</strong>. That is not a bad-luck
+seed: repeat the split with any seed and the test tiles still touch 56&ndash;60 of the 60 lakes,
+and the leak rate is 100% every time. With 60 lakes and ~35 frames each, a tile-level split
+cannot help but leak.
 </p>
 <figure>
 <svg viewBox="0 0 900 250" role="img" aria-label="Left: splitting by tile scatters each lake's frames across train and test, so every lake leaks. Right: splitting by lake assigns each lake wholly to one side.">
@@ -336,7 +347,7 @@ both common and silent. The original model took a fixed 512&times;512 RGB frame 
 the last feature block straight into a dense layer:
 </p>
 <figure>
-<svg viewBox="0 0 1120 250" role="img" aria-label="Tensor shapes through the network: 3 by 512 by 512 input shrinks through three conv-pool blocks to 64 by 64 by 64, is flattened to 262,144 values, then a dense layer maps to 128 and to a single logit. The dense layer after flatten holds 33.5 million of the 33.6 million parameters.">
+<svg viewBox="0 0 1120 250" role="img" aria-label="Tensor shapes through the retired January architecture: a 3 by 512 by 512 input shrinks through three conv-pool blocks to 64 by 64 by 64, is flattened to 262,144 values, then a dense layer maps to 128 and to a single logit. That one dense layer holds 33.5 million of the model's 33.6 million parameters.">
   <defs>
     <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -398,7 +409,7 @@ operation that owns them. One dense layer &mdash;
 weights.</figcaption>
 </figure>
 
-<h3>Where the 33.5 million parameters come from</h3>
+<h3>Where the 33.5 million parameters came from (retired January 2026)</h3>
 <p>
 The conv stack is tiny (&asymp;23.6k weights). The explosion happens at the boundary between
 convolution and the head. After three pool halvings, the feature block is
@@ -417,9 +428,10 @@ neurons:
 </table>
 <p>
 Nobody chose a 33M-parameter model; the dense layer silently inherited the full image area,
-because a flatten head scales with <em>resolution</em>, not with design intent. Fit to ~8,000
-training frames, that is roughly 4,000 parameters per example &mdash; ample capacity to memorize
-the training lakes, which is also why the tile-split leak inflated scores so effectively.
+because a flatten head scales with <em>resolution</em>, not with design intent. It was fit to the
+2,090-frame Labelbox campaign &mdash; roughly <strong>16,000 parameters for every labeled frame
+in existence</strong> &mdash; which is ample capacity to memorize the training lakes, and part of
+why the tile-split leak inflated scores so effectively.
 </p>
 
 <h3>The fix: global average pooling</h3>
@@ -471,8 +483,8 @@ the training lakes, which is also why the tile-split leak inflated scores so eff
   <text x="600" y="144" font-size="12.5" fill="currentColor" text-anchor="middle">1</text>
   <g font-size="12" fill="currentColor" opacity="0.85">
     <text x="660" y="120">same conv stack, same output;</text>
-    <text x="660" y="140">the head shrinks &asymp;1,000&times;</text>
-    <text x="660" y="160">(33.6&thinsp;M &rarr; &asymp;32&thinsp;k total)</text>
+    <text x="660" y="140">the head shrinks &asymp;4,000&times;</text>
+    <text x="660" y="160">(whole model 33.6&thinsp;M &rarr; 32,257)</text>
   </g>
 </svg>
 <figcaption>Two heads on the same feature block. Averaging each channel to one number before the
@@ -488,28 +500,37 @@ task). The flatten head survives only to load pre-August-2026 checkpoints
 </p>
 
 <h2>6. Baselines any model must beat</h2>
-<p>On held-out lakes of the current dataset:</p>
+<p>
+Fit on the 320 development lakes and scored on the 80 frozen test lakes (2,000 frames, 67.5%
+useful) &mdash; the same lakes, and the same fit-then-score discipline, as the final model:
+</p>
 <table>
 <tr><th>baseline</th><th>accuracy</th><th>what it knows</th></tr>
-<tr><td>majority class ("always useful")</td><td class="num">68.4%</td><td>nothing</td></tr>
-<tr><td>JPG file-size threshold (44&thinsp;KB)</td><td class="num">82.5%</td><td>one byte count per image</td></tr>
+<tr><td>majority class ("always useful")</td><td class="num">67.5%</td><td>nothing</td></tr>
+<tr><td>JPG file-size threshold (44&thinsp;KB)</td><td class="num">82.2%</td><td>one byte count per image</td></tr>
 </table>
 <p>
 The file-size baseline works because JPEG compression is an entropy meter: clear ice is detailed
 and compresses poorly, cloud is smooth and compresses well
 (<code>cloudytile/splits.py::filesize_baseline</code>). Any reported CNN accuracy should be
-quoted against <strong>82.5%</strong>, not against chance &mdash; the interesting margin is what
+quoted against <strong>82.2%</strong>, not against chance &mdash; the interesting margin is what
 the network earns above a <code>stat()</code> call. Scene-level
 <code>eo_cloud_cover</code> metadata, for comparison, is nearly uninformative about per-tile
 usability and in 2019 actually ran backwards against human judgment.
 </p>
+<p>
+The threshold is fit on the development lakes and applied to test, for the same reason model
+selection is kept off the test lakes: a threshold tuned on the data it is scored on flatters the
+baseline, which would understate the model's true margin. Reproduce with
+<code>engine/run_baselines.py</code>; the result is committed at
+<code>splits/cloudytile_v1/baselines.json</code>, so the number has provenance and moves only
+when the split does.
+</p>
 <div class="callout">
-<strong>Caveat on these two numbers.</strong> They were computed ad hoc, before
-<code>splits/cloudytile_v1</code> was frozen, on a held-out set that is <em>not</em> the current
-80 test lakes &mdash; and no script or result file in the repo reproduces them. Comparing a model
-scored on the frozen test lakes against a baseline scored on different lakes is not a like-for-like
-margin. Both baselines should be recomputed on the frozen test lakes, and the result committed,
-before either number is quoted in a paper.
+Earlier drafts of this page quoted <strong>68.4%</strong> and <strong>82.5%</strong>. Those were
+computed ad hoc before <code>splits/cloudytile_v1</code> was frozen, on a held-out set that is
+not the current 80 test lakes, and nothing in the repo reproduced them. The numbers above replace
+them and are the ones to quote.
 </div>
 
 <h2>7. Choosing a model without cheating</h2>
@@ -601,7 +622,7 @@ can be re-run at 512 afterwards if resolution turns out to matter.
 
 <h3>Reading the table</h3>
 <p>
-Configurations are ranked by <strong>AUC</strong>, not accuracy. Accuracy sits near the 68.4%
+Configurations are ranked by <strong>AUC</strong>, not accuracy. Accuracy sits near the 67.5%
 majority rate, which compresses real differences, and it depends on a threshold &mdash; ranking by
 it would compare operating points and models at the same time. AUC is threshold-free.
 </p>

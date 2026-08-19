@@ -17,8 +17,8 @@ holds 679 + 1000 per-lake files. Only the imagery is shared with that deposit â€
 cloudy-tile keeps its own splits, since tile usefulness is a different task from
 drainage class and should not inherit that stratification.
 
-Split by lake_id, never by tile: the previous 80/10/10 tile split put all 52
-test lakes in train as well, so nothing was actually held out.
+Split by lake_id, never by tile: the previous 80/10/10 tile split put every
+test lake in train as well, so nothing was actually held out.
 
 Usage:
     python extract_label_frames.py \

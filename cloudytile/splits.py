@@ -3,8 +3,10 @@ Lake-grouped train/val/test splitting.
 
 Tiles from one lake at nearby timesteps are near-duplicate scenes, so splitting
 at the tile level leaks a lake across the split: with the original 80/10/10
-tile split on the 2,090-row labels_deprecated.csv, all 52 test lakes appeared in
-train and nothing was genuinely held out. Every function here splits on
+tile split on the 2,090-row labels_deprecated.csv, every test lake appeared in
+train and nothing was genuinely held out. That is structural, not a bad seed:
+across seeds the test tiles touch 56-60 of the 60 lakes and the leak rate is
+100% every time. Every function here splits on
 lake_id, so a lake lands wholly inside one split.
 
 This supersedes data.py::create_splits for any reported number. That function

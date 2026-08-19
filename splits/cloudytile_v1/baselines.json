@@ -1,0 +1,17 @@
+{
+  "split_dir": "splits/cloudytile_v1",
+  "labels_csv": "labels/labels.csv",
+  "n_test_tiles": 2000,
+  "n_test_lakes": 80,
+  "test_useful_rate": 0.6755,
+  "majority": {
+    "majority_label": 1,
+    "accuracy": 0.6755,
+    "n": 2000
+  },
+  "filesize": {
+    "threshold_bytes": 45455,
+    "accuracy": 0.8225,
+    "n": 2000
+  }
+}

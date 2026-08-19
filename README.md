@@ -153,8 +153,8 @@ Report against these, not against chance (held-out lakes, current dataset):
 
 | baseline | accuracy |
 |---|---|
-| majority class | 68.4% |
-| JPG file-size threshold | 82.5% |
+| majority class | 67.5% |
+| JPG file-size threshold | 82.2% |
 
 `cloudytile/splits.py::filesize_baseline` computes the second; anything a model earns above it is
 work on the actual clear-vs-cloud problem. Because accuracy sits so close to the majority rate,
