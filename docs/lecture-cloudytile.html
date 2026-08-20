@@ -26,6 +26,7 @@
   h1 { font-size: 1.7rem; margin: 0 0 .2rem; }
   h2 { font-size: 1.25rem; margin: 2.6rem 0 .6rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
   h3 { font-size: 1.02rem; margin: 1.6rem 0 .4rem; }
+  h4 { font-size: .98rem; margin: 1.4rem 0 .4rem; }
   .subtitle { color: var(--muted); margin-bottom: 2rem; }
   p { margin: .6rem 0; }
   code, pre {
@@ -514,6 +515,91 @@ selection step.
 untouched by all 96 (config, fold) runs, so the single number they eventually produce has not been
 optimized against.</figcaption>
 </figure>
+
+<h3>What a fold is</h3>
+<p>
+A single train/test split produces one number, and nothing to say how much of that number was
+luck. <strong>k-fold cross-validation</strong> produces k numbers instead. Divide the lakes into
+k equal parts &mdash; each part is a <em>fold</em> &mdash; then train k separate times. Each time,
+one fold is held out and scored, and the other k&minus;1 are trained on. Every lake ends up held
+out exactly once, by a model that never saw it.
+</p>
+<figure>
+<svg viewBox="0 0 900 300" role="img" aria-label="Five-fold cross-validation over 320 development lakes. The pool is divided into five equal parts of 64 lakes. Each of five rows is one fold: a different one of the five parts is held out and scored while the other four, 256 lakes, are trained on. The five held-out blocks tile the pool exactly, so every lake is scored once by a model that never saw it.">
+  <text x="460" y="24" font-size="12" fill="currentColor" text-anchor="middle">320 development lakes, divided into 5 equal parts of 64</text>
+  <g stroke="currentColor" stroke-width="1" opacity="0.25">
+    <line x1="250" y1="40" x2="250" y2="232"/>
+    <line x1="390" y1="40" x2="390" y2="232"/>
+    <line x1="530" y1="40" x2="530" y2="232"/>
+    <line x1="670" y1="40" x2="670" y2="232"/>
+  </g>
+  <g>
+    <rect x="110" y="46"  width="700" height="28" fill="currentColor" opacity="0.18"/>
+    <rect x="110" y="84"  width="700" height="28" fill="currentColor" opacity="0.18"/>
+    <rect x="110" y="122" width="700" height="28" fill="currentColor" opacity="0.18"/>
+    <rect x="110" y="160" width="700" height="28" fill="currentColor" opacity="0.18"/>
+    <rect x="110" y="198" width="700" height="28" fill="currentColor" opacity="0.18"/>
+  </g>
+  <g fill="var(--accent)">
+    <rect x="110" y="46"  width="140" height="28"/>
+    <rect x="250" y="84"  width="140" height="28"/>
+    <rect x="390" y="122" width="140" height="28"/>
+    <rect x="530" y="160" width="140" height="28"/>
+    <rect x="670" y="198" width="140" height="28"/>
+  </g>
+  <g font-size="11.5" fill="currentColor" text-anchor="end" opacity="0.85">
+    <text x="100" y="65">fold 0</text>
+    <text x="100" y="103">fold 1</text>
+    <text x="100" y="141">fold 2</text>
+    <text x="100" y="179">fold 3</text>
+    <text x="100" y="217">fold 4</text>
+  </g>
+  <text x="180" y="65" font-size="10.5" fill="var(--bg)" text-anchor="middle">held out</text>
+  <text x="530" y="65" font-size="10.5" fill="currentColor" text-anchor="middle" opacity="0.8">trained on (256 lakes)</text>
+  <text x="460" y="256" font-size="11.5" fill="currentColor" text-anchor="middle" opacity="0.8">the five held-out blocks tile the pool exactly &mdash; no lake is scored twice, none is missed</text>
+  <text x="460" y="278" font-size="11.5" fill="var(--danger)" text-anchor="middle">the frozen 80 test lakes are in none of these rows</text>
+</svg>
+<figcaption>One configuration, scored five times. Its reported score is the mean of the five;
+the standard deviation across them is the <em>fold spread</em>, and it is what separates a real
+difference between configurations from a lucky draw. Drawn here at k&nbsp;=&nbsp;5, as the
+finalist rerun uses; the 32-config grid above runs the same scheme at k&nbsp;=&nbsp;3, holding out
+~107 lakes per fold instead of 64.</figcaption>
+</figure>
+<p>
+Both numbers matter. The <strong>mean</strong> is the configuration's score. The
+<strong>spread</strong> says how far that score moves on luck alone &mdash; because each fold
+holds out a different set of lakes, and some draws happen to contain more genuinely ambiguous
+frames than others. A gap between two configurations smaller than the spread is not a result.
+</p>
+
+<h4>Choosing k</h4>
+<p>The number of folds is a trade, not a free parameter:</p>
+<table>
+<tr><th>k</th><th>held out per fold</th><th>trained on</th><th>std. error of the mean</th></tr>
+<tr><td>3</td><td>~107 lakes</td><td>213 lakes</td><td class="num">spread / &radic;3 = 0.0021</td></tr>
+<tr><td>5</td><td>64 lakes</td><td>256 lakes</td><td class="num">spread / &radic;5 = 0.0017</td></tr>
+</table>
+<p>
+More folds makes each individual estimate noisier, since fewer lakes are held out &mdash; but you
+average more of them, and every model trains on more data. The net effect is a tighter estimate of
+the configuration's true score. The config grid runs at <strong>k = 3</strong>, which is enough to
+answer coarse questions like "do extra bands help" across 32 configurations cheaply. The finalist
+rerun uses <strong>k = 5</strong>, because by that point the remaining question is a near-tie
+between a handful of configurations and precision is exactly what is missing.
+</p>
+<p>
+One consequence to keep straight: <strong>a k = 3 score and a k = 5 score are not comparable.</strong>
+They are means over different partitions with different held-out sizes. Configurations are only
+ever ranked against others scored on identical folds &mdash; which they always are, because folds
+are a function of <code>(labels, n_folds, seed)</code> and nothing about the configuration.
+</p>
+<div class="callout">
+<strong>A naming trap.</strong> Each result JSON carries <code>test_auc</code>,
+<code>n_test_lakes</code> and friends. Those describe <em>that fold's held-out lakes</em>, drawn
+entirely from the 320 development lakes &mdash; not the frozen 80 test lakes, which appear in no
+fold and are read only by the final model. A fold reporting
+<code>n_test_lakes: 64</code> has held out 64 of the 320, and the 80 remain untouched.
+</div>
 
 <h3>The grid</h3>
 <p>
