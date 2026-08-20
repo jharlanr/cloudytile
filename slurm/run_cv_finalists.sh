@@ -55,16 +55,26 @@
 #     from run_cv_grid import GRID, config_name; \
 #     [print(i, config_name(c)) for i,c in enumerate(GRID)]"
 #
-# TODO: fill in from `run_cv_grid.py --out_dir <40ep results> --summarize`
-# once the 40-epoch grid finishes. Keep the adamw arm only (the optimizer axis
-# was null: 0.0024 AUC, well inside the fold spread), and include at least one
-# `wide` and one lr 3e-4 config -- those are the arms the 40-epoch budget
-# penalized, so they deserve a fair test rather than inheriting a confounded
-# result.
+# Chosen from the completed 40-epoch grid (96/96 runs, 32/32 configs).
 #
-# NOTE: the --array range below must match the length of CONFIGS. Six configs
+# adamw only: the optimizer axis was null (+0.0012 AUC, inside the 0.0037 fold
+# spread) and adamw led, so it is fixed rather than searched. rgb is dropped
+# outright -- all 8 rgb configs occupied the bottom 8 of 32 ranks, a separation
+# with odds near 1 in 10.5 million by chance. Both `wide` and lr 3e-4 are kept
+# on purpose: those arms hit the 40-epoch ceiling most often (71% and 67% of
+# runs), so their null result there is confounded with the budget and deserves
+# a fair retest rather than being written off.
+#
+#   17  rgb+swir16_small_lr0.001_adamw    grid #1,  0.9780
+#    9  rgb+nir_small_lr0.001_adamw       grid #3,  0.9768, tightest spread (0.0010)
+#   15  rgb+nir_wide_lr0.0003_adamw       grid #2,  0.9775, wide + slow lr
+#   23  rgb+swir16_wide_lr0.0003_adamw    grid #7,  0.9759, wide + slow lr
+#   19  rgb+swir16_small_lr0.0003_adamw   grid #9,  0.9757, slow lr
+#   25  all6_small_lr0.001_adamw          grid #11, 0.9757, do 6 bands win at convergence?
+#
+# NOTE: the --array range above must match the length of CONFIGS. Six configs
 # means --array=0-5%4.
-CONFIGS=(TBD)
+CONFIGS=(17 9 15 23 19 25)
 
 if [ "${CONFIGS[0]}" = "TBD" ]; then
     echo "ERROR: CONFIGS is still the placeholder. Fill it in from --summarize first." >&2
