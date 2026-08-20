@@ -184,8 +184,8 @@ averages ~1,350 with a CV above 1.0. Setting no-data to zero <em>after</em> norm
 at the mean of each band &mdash; the least informative value available.
 </p>
 <p>
-Doing it in the other order &mdash; the January behaviour &mdash; is what makes this more than
-bookkeeping. A raw 0&nbsp;DN normalizes to &minus;4.4&thinsp;&sigma; in red,
+Doing it in the other order is what makes this more than bookkeeping. Fill first and a raw
+0&nbsp;DN normalizes to &minus;4.4&thinsp;&sigma; in red,
 &minus;4.9&thinsp;&sigma; in green and &minus;5.1&thinsp;&sigma; in blue: an extreme, perfectly
 constant value marking exactly the pixels that carry no information. Since no-data fraction
 correlates with the label, that hands the network a shortcut feature it can key on instead of
@@ -215,11 +215,11 @@ it labels a different frame population.
 Two frames of the same lake a few days apart are near-duplicate images. A split drawn at the
 <em>tile</em> level therefore puts almost every lake on both sides of the line: the model meets
 the test lakes during training and the test score measures recognition, not generalization. This
-is not hypothetical &mdash; under the original tile split of the deprecated dataset,
-<strong>every single test lake appeared in the training set too</strong>. That is not a bad-luck
-seed: repeat the split with any seed and the test tiles still touch 56&ndash;60 of the 60 lakes,
-and the leak rate is 100% every time. With 60 lakes and ~35 frames each, a tile-level split
-cannot help but leak.
+is not a hypothetical risk but an arithmetic certainty. Take any densely-sampled lake set
+&mdash; say 60 lakes with ~35 frames each &mdash; and split it at the tile level: whatever the
+seed, the test tiles touch 56&ndash;60 of the 60 lakes and <strong>100% of test lakes also appear
+in training</strong>. With 25 frames per lake in the current set the arithmetic is the same. A
+tile-level split cannot hold anything out.
 </p>
 <figure>
 <svg viewBox="0 0 900 250" role="img" aria-label="Left: splitting by tile scatters each lake's frames across train and test, so every lake leaks. Right: splitting by lake assigns each lake wholly to one side.">
@@ -304,8 +304,8 @@ out whole lakes, so test frames come from lakes the model has never seen.</figca
 <code>cloudytile/splits.py</code> implements this: <code>create_lake_splits</code> for a single
 lake-disjoint partition, <code>lake_group_kfold</code> for stratified grouped CV, and
 <code>assert_lake_disjoint</code> as a guard that is called, not merely available.
-<code>run_training.py</code> defaults to <code>--split_by lake</code>; the legacy
-<code>--split_by tile</code> survives only to reproduce old runs, and warns.
+<code>run_training.py</code> defaults to <code>--split_by lake</code>. A <code>--split_by tile</code>
+option exists but emits a warning: there is no correct use for it on this data.
 </p>
 
 <h3>Freezing the split</h3>
@@ -341,162 +341,86 @@ conv blocks &mdash; each <em>conv 3&times;3 &rarr; BatchNorm &rarr; ReLU &rarr; 
 Training augments with flips and 90&deg; rotations, which are exact symmetries here: a satellite
 tile has no canonical orientation.
 </p>
-<p>
-None of that was true in January, and the history earns a section because the failure mode is
-both common and silent. The original model took a fixed 512&times;512 RGB frame and flattened
-the last feature block straight into a dense layer:
-</p>
 <figure>
-<svg viewBox="0 0 1120 250" role="img" aria-label="Tensor shapes through the retired January architecture: a 3 by 512 by 512 input shrinks through three conv-pool blocks to 64 by 64 by 64, is flattened to 262,144 values, then a dense layer maps to 128 and to a single logit. That one dense layer holds 33.5 million of the model's 33.6 million parameters.">
+<svg viewBox="0 0 1100 250" role="img" aria-label="Tensor shapes through CloudyTileCNN with four input bands at 256 pixels. The input shrinks through three conv-BatchNorm-pool blocks to 64 by 32 by 32, is reduced by global average pooling to 64 values, then two linear layers map to 128 and to a single logit. Layer parameter counts are 624, 4704, 18624, zero for the pooling, 8320 and 129, totalling 32,401.">
   <defs>
-    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
     </marker>
   </defs>
-  <!-- feature-map boxes, heights shrinking with spatial size -->
   <g fill="none" stroke="currentColor" stroke-width="1.3">
-    <rect x="20"  y="55"  width="80" height="140" rx="6"/>
-    <rect x="230" y="75"  width="80" height="110" rx="6"/>
-    <rect x="440" y="90"  width="80" height="85"  rx="6"/>
-    <rect x="650" y="102" width="80" height="62"  rx="6"/>
+    <rect x="20"  y="50" width="76" height="140" rx="6"/>
+    <rect x="205" y="68" width="76" height="104" rx="6"/>
+    <rect x="390" y="82" width="76" height="76"  rx="6"/>
+    <rect x="575" y="94" width="76" height="52"  rx="6"/>
   </g>
-  <rect x="830" y="45" width="20" height="160" rx="4" fill="none" stroke="var(--danger)" stroke-width="1.6"/>
-  <g fill="none" stroke="currentColor" stroke-width="1.3">
-    <rect x="950" y="105" width="58" height="46" rx="6"/>
+  <rect x="745" y="98" width="16" height="44" rx="3" fill="none" stroke="var(--good)" stroke-width="1.6"/>
+  <rect x="855" y="97" width="56" height="46" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <circle cx="1010" cy="120" r="20" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr5)">
+    <line x1="96"  y1="120" x2="201" y2="120"/>
+    <line x1="281" y1="120" x2="386" y2="120"/>
+    <line x1="466" y1="120" x2="571" y2="120"/>
+    <line x1="651" y1="120" x2="741" y2="120"/>
+    <line x1="761" y1="120" x2="851" y2="120"/>
+    <line x1="911" y1="120" x2="986" y2="120"/>
   </g>
-  <circle cx="1078" cy="128" r="20" fill="none" stroke="currentColor" stroke-width="1.3"/>
-  <!-- arrows with op labels -->
-  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr2)">
-    <line x1="100" y1="125" x2="226" y2="125"/>
-    <line x1="310" y1="125" x2="436" y2="125"/>
-    <line x1="520" y1="125" x2="646" y2="125"/>
-    <line x1="730" y1="125" x2="826" y2="125"/>
-    <line x1="850" y1="125" x2="946" y2="125"/>
-    <line x1="1008" y1="128" x2="1054" y2="128"/>
+  <g font-size="10.5" fill="currentColor" opacity="0.8" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">
+    <text x="148" y="106">conv+BN+pool</text>
+    <text x="333" y="106">conv+BN+pool</text>
+    <text x="518" y="106">conv+BN+pool</text>
+    <text x="696" y="106">global avg pool</text>
+    <text x="806" y="106">Linear</text>
+    <text x="948" y="106">Linear</text>
   </g>
-  <g font-size="11" fill="currentColor" opacity="0.8" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">
-    <text x="163" y="112">conv&rarr;pool</text>
-    <text x="373" y="112">conv&rarr;pool</text>
-    <text x="583" y="112">conv&rarr;pool</text>
-    <text x="778" y="112">flatten</text>
-    <text x="898" y="112">Linear</text>
+  <g font-size="11" fill="currentColor" opacity="0.75" text-anchor="middle">
+    <text x="148" y="142">624</text>
+    <text x="333" y="142">4,704</text>
+    <text x="518" y="142">18,624</text>
+    <text x="806" y="142">8,320</text>
+    <text x="948" y="142">129</text>
   </g>
-  <!-- shape labels -->
-  <g font-size="12.5" fill="currentColor" text-anchor="middle">
-    <text x="60"  y="215">3&times;512&times;512</text>
-    <text x="270" y="215">16&times;256&times;256</text>
-    <text x="480" y="215">32&times;128&times;128</text>
-    <text x="690" y="215">64&times;64&times;64</text>
-    <text x="840" y="228">262,144</text>
-    <text x="979" y="132">128</text>
-    <text x="1078" y="132">1</text>
+  <text x="696" y="142" font-size="11" fill="var(--good)" text-anchor="middle" font-weight="600">0 params</text>
+  <g font-size="12" fill="currentColor" text-anchor="middle">
+    <text x="58"  y="212">4&times;256&times;256</text>
+    <text x="243" y="212">16&times;128&times;128</text>
+    <text x="428" y="212">32&times;64&times;64</text>
+    <text x="613" y="212">64&times;32&times;32</text>
+    <text x="753" y="212">64</text>
+    <text x="883" y="125">128</text>
+    <text x="1010" y="125">1</text>
   </g>
-  <!-- parameter counts -->
-  <g font-size="11" text-anchor="middle" fill="currentColor" opacity="0.75">
-    <text x="163" y="146">448 params</text>
-    <text x="373" y="146">4,640</text>
-    <text x="583" y="146">18,496</text>
-    <text x="1078" y="165">129</text>
-  </g>
-  <text x="898" y="150" font-size="11.5" text-anchor="middle" fill="var(--danger)" font-weight="600">33,554,560</text>
-  <text x="60" y="40" font-size="12.5" fill="currentColor">input RGB</text>
-  <text x="840" y="35" font-size="11.5" text-anchor="middle" fill="var(--danger)">flattened vector</text>
+  <text x="58" y="38" font-size="12" fill="currentColor" text-anchor="middle">input bands</text>
 </svg>
-<figcaption>Tensor shapes through the <strong>legacy flatten configuration</strong> at
-512&times;512, RGB, channels [16,&thinsp;32,&thinsp;64], fc [128]. Parameter counts sit under the
-operation that owns them. One dense layer &mdash;
-<span class="danger-text">262,144&thinsp;&times;&thinsp;128</span> &mdash; holds 99.9% of all
-weights.</figcaption>
+<figcaption>Tensor shapes and per-stage parameter counts for the <code>rgb+nir</code> configuration
+at 256&thinsp;px &mdash; 32,401 parameters in total, which is what
+<code>run_cv_grid.py</code> reports for that config. Global average pooling collapses each of the
+64 channels to its mean, so the classifier head sees 64 numbers no matter how large the input
+image was.</figcaption>
 </figure>
-
-<h3>Where the 33.5 million parameters came from (retired January 2026)</h3>
 <p>
-The conv stack is tiny (&asymp;23.6k weights). The explosion happens at the boundary between
-convolution and the head. After three pool halvings, the feature block is
-64&thinsp;&times;&thinsp;64&thinsp;&times;&thinsp;64 = 262,144 numbers &mdash; and
-<code>Flatten &rarr; Linear(262144, 128)</code> connects every one of them to every one of 128
-neurons:
+That last point is the reason for the GAP head. A head that flattens the final feature block
+instead would size its first dense layer to the <em>image area</em>: at 256&thinsp;px that is a
+65,536-element vector, and at 512&thinsp;px a 262,144-element one, giving dense layers of 8.4M
+and 33.5M weights respectively. The parameter count would then be set by a preprocessing choice
+rather than by any decision about model capacity, and it would change out from under you the
+moment the input resolution changed. Averaging instead makes the head 8,320 parameters at every
+resolution, which is why the config grid can be run at 256&thinsp;px and the winner re-run at
+512&thinsp;px without touching the architecture.
 </p>
+<h3>Parameter counts across the grid</h3>
 <table>
-<tr><th>layer</th><th>parameters</th><th>share</th></tr>
-<tr><td>conv 3&rarr;16</td><td class="num">448</td><td class="num">&lt;0.01%</td></tr>
-<tr><td>conv 16&rarr;32</td><td class="num">4,640</td><td class="num">0.01%</td></tr>
-<tr><td>conv 32&rarr;64</td><td class="num">18,496</td><td class="num">0.06%</td></tr>
-<tr><td><span class="danger-text">Linear 262,144&rarr;128</span></td><td class="num"><span class="danger-text">33,554,560</span></td><td class="num"><span class="danger-text">99.93%</span></td></tr>
-<tr><td>Linear 128&rarr;1</td><td class="num">129</td><td class="num">&lt;0.01%</td></tr>
-<tr><td><strong>total</strong></td><td class="num"><strong>33,578,273</strong></td><td></td></tr>
+<tr><th>configuration</th><th>conv channels</th><th>parameters</th></tr>
+<tr><td><code>rgb</code> small</td><td>[16,&thinsp;32,&thinsp;64]</td><td class="num">32,257</td></tr>
+<tr><td><code>rgb+nir</code> small</td><td>[16,&thinsp;32,&thinsp;64]</td><td class="num">32,401</td></tr>
+<tr><td><code>all6</code> small</td><td>[16,&thinsp;32,&thinsp;64]</td><td class="num">32,689</td></tr>
+<tr><td><code>rgb</code> wide</td><td>[32,&thinsp;64,&thinsp;128]</td><td class="num">110,337</td></tr>
 </table>
 <p>
-Nobody chose a 33M-parameter model; the dense layer silently inherited the full image area,
-because a flatten head scales with <em>resolution</em>, not with design intent. It was fit to the
-2,090-frame Labelbox campaign &mdash; roughly <strong>16,000 parameters for every labeled frame
-in existence</strong> &mdash; which is ample capacity to memorize the training lakes, and part of
-why the tile-split leak inflated scores so effectively.
-</p>
-
-<h3>The fix: global average pooling</h3>
-<figure>
-<svg viewBox="0 0 980 290" role="img" aria-label="Two heads from the same 64 by 64 by 64 feature block. Flatten produces 262,144 values and a 33.55 million parameter dense layer. Global average pooling produces 64 values and an 8,320 parameter dense layer. Both end at 128 features and one logit.">
-  <defs>
-    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
-    </marker>
-  </defs>
-  <rect x="20" y="105" width="120" height="80" rx="8" fill="none" stroke="currentColor" stroke-width="1.3"/>
-  <g font-size="12.5" fill="currentColor" text-anchor="middle">
-    <text x="80" y="140">features</text>
-    <text x="80" y="158">64&times;64&times;64</text>
-  </g>
-  <!-- top branch: flatten -->
-  <g stroke="var(--danger)" stroke-width="1.4" marker-end="url(#arr3)" fill="none">
-    <path d="M140,125 C 200,125 210,70 268,70"/>
-    <line x1="360" y1="70" x2="470" y2="70"/>
-  </g>
-  <rect x="272" y="42" width="86" height="56" rx="6" fill="none" stroke="var(--danger)" stroke-width="1.4"/>
-  <g font-size="12" text-anchor="middle" fill="var(--danger)">
-    <text x="315" y="66">262,144</text>
-    <text x="315" y="84">values</text>
-    <text x="200" y="52">flatten</text>
-    <text x="415" y="56" font-family="ui-monospace, Menlo, monospace" font-size="11">Linear</text>
-    <text x="415" y="94" font-weight="600">33.55&thinsp;M params</text>
-  </g>
-  <!-- bottom branch: GAP -->
-  <g stroke="var(--good)" stroke-width="1.4" marker-end="url(#arr3)" fill="none">
-    <path d="M140,165 C 200,165 210,220 268,220"/>
-    <line x1="360" y1="220" x2="470" y2="220"/>
-  </g>
-  <rect x="272" y="192" width="86" height="56" rx="6" fill="none" stroke="var(--good)" stroke-width="1.4"/>
-  <g font-size="12" text-anchor="middle" fill="var(--good)">
-    <text x="315" y="216">64</text>
-    <text x="315" y="234">values</text>
-    <text x="196" y="252">global avg pool</text>
-    <text x="415" y="206" font-family="ui-monospace, Menlo, monospace" font-size="11">Linear</text>
-    <text x="415" y="244" font-weight="600">8,320 params</text>
-  </g>
-  <!-- shared tail -->
-  <rect x="474" y="117" width="58" height="46" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
-  <text x="503" y="144" font-size="12.5" fill="currentColor" text-anchor="middle">128</text>
-  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr3)">
-    <line x1="532" y1="140" x2="576" y2="140"/>
-  </g>
-  <circle cx="600" cy="140" r="20" fill="none" stroke="currentColor" stroke-width="1.3"/>
-  <text x="600" y="144" font-size="12.5" fill="currentColor" text-anchor="middle">1</text>
-  <g font-size="12" fill="currentColor" opacity="0.85">
-    <text x="660" y="120">same conv stack, same output;</text>
-    <text x="660" y="140">the head shrinks &asymp;4,000&times;</text>
-    <text x="660" y="160">(whole model 33.6&thinsp;M &rarr; 32,257)</text>
-  </g>
-</svg>
-<figcaption>Two heads on the same feature block. Averaging each channel to one number before the
-dense layer removes the resolution dependence entirely &mdash; the model also stops caring what
-size the input image is.</figcaption>
-</figure>
-<p>
-This is the current default: <code>CloudyTileCNN</code> ships with the GAP head, batch
-normalization after each conv, dropout before the final layer, and flip/rotation augmentation at
-train time (satellite tiles have no canonical orientation, so those are exact symmetries of the
-task). The flatten head survives only to load pre-August-2026 checkpoints
-(<code>head="flatten", batch_norm=False, dropout=0.0</code>).
+Adding input bands costs almost nothing &mdash; three extra channels is 432 weights in the first
+conv &mdash; because band count only touches one layer. Widening the conv stack is what actually
+changes capacity, and it is a 3.4&times; jump. Both are small enough that the whole grid fits
+comfortably on one GPU.
 </p>
 
 <h2>6. Baselines any model must beat</h2>
@@ -526,12 +450,6 @@ baseline, which would understate the model's true margin. Reproduce with
 <code>splits/cloudytile_v1/baselines.json</code>, so the number has provenance and moves only
 when the split does.
 </p>
-<div class="callout">
-Earlier drafts of this page quoted <strong>68.4%</strong> and <strong>82.5%</strong>. Those were
-computed ad hoc before <code>splits/cloudytile_v1</code> was frozen, on a held-out set that is
-not the current 80 test lakes, and nothing in the repo reproduced them. The numbers above replace
-them and are the ones to quote.
-</div>
 
 <h2>7. Choosing a model without cheating</h2>
 <p>
@@ -606,12 +524,11 @@ optimizers &mdash; each scored on 3 identical lake-grouped folds. The folds are 
 never by data.
 </p>
 <p>
-The central question is the band question. A January sweep concluded that bands beyond RGB do not
-help, but it was measured on the leaked tile split, where the model could recognize its test
-lakes and any real signal would have been swamped. On a clean split the question is genuinely
-open, and it matters: the band statistics show SWIR varying far more than the visible bands
-(coefficient of variation above 1.0 against roughly 0.23), which is exactly the kind of dynamic
-range that could separate cloud from bright ice.
+The central question is the band question: does anything beyond true colour help a human-defined
+usability call? There is a physical reason to think so. The band statistics show SWIR varying far
+more than the visible bands &mdash; coefficient of variation above 1.0, against 0.20&ndash;0.23
+&mdash; and that dynamic range is exactly what could separate cloud from bright ice, which look
+alike in RGB.
 </p>
 <p>
 Everything else is held fixed &mdash; GAP head, BatchNorm, dropout 0.3, augmentation, 40 epochs,
@@ -706,27 +623,30 @@ process_directory(nc_dir=..., model_path="best_model.pth",
                   nc_channels=["red","green","blue","nir"],
                   var_name="cloudy_seq_rgb", output_dir=...)</code></pre>
 
-<h2>9. Lessons encoded in this repo</h2>
+<h2>9. The rules this repo runs on</h2>
+<p>Nine constraints shape everything above. If you change one, change it deliberately.</p>
 <ul>
-<li><strong>Split by group, not by sample</strong>, whenever samples are correlated &mdash; here,
-frames of the same lake. The guard is one assert; the silent version of the bug costs months.</li>
+<li><strong>Split by group, not by sample.</strong> Whenever samples are correlated &mdash; here,
+frames of the same lake &mdash; the group is the unit of independence. The guard is one assert;
+without it the leak is invisible and every score is inflated.</li>
 <li><strong>Freeze the split, don't seed it.</strong> A seed-derived split moves every time the
-label file grows, so results drift apart for reasons nobody is tracking. Commit the ids.</li>
+label file grows, so two results are never comparable. The lake ids are committed.</li>
 <li><strong>Selection is training.</strong> Picking the best of 32 configurations consumes the
-data you picked on. Keep a holdout that no comparison ever touches.</li>
-<li><strong>Report the dumb baseline.</strong> A file-size threshold scored 88% on the old
-dataset; nobody knew because nobody computed it. Then compute it on the <em>same</em> holdout as
-the model, or the margin means nothing.</li>
-<li><strong>A win smaller than the noise is not a win.</strong> Report the fold-to-fold spread
-next to the mean, and prefer the simpler model inside it.</li>
-<li><strong>Metrics must describe the artifact.</strong> Training restores the best checkpoint
-before the test pass, so the printed numbers describe the saved weights.</li>
-<li><strong>Parameter counts hide in dense layers.</strong> Print them per layer once per
-architecture change; a flatten head scales with image area, not intent.</li>
-<li><strong>Order matters in preprocessing.</strong> Normalize, then fill no-data &mdash; the
-other order encodes "missing" as an extreme value that correlates with the label.</li>
+data you picked on. The 80 test lakes are held back from every comparison for exactly that
+reason.</li>
+<li><strong>Report the dumb baseline, on the same holdout.</strong> A <code>stat()</code> call
+reaches 82.2%. A margin measured against a baseline scored on <em>different</em> lakes is not a
+margin at all.</li>
+<li><strong>A win smaller than the noise is not a win.</strong> Quote the fold-to-fold spread
+beside the mean, and inside that spread prefer the simpler model.</li>
+<li><strong>Metrics must describe the artifact.</strong> The test pass runs on the restored
+best-validation checkpoint, so the printed numbers describe the weights that actually ship.</li>
+<li><strong>Keep the head resolution-independent.</strong> Global average pooling means parameter
+count is a design decision rather than a side effect of the input size.</li>
+<li><strong>Order matters in preprocessing.</strong> Normalize, then fill no-data. The other
+order encodes "missing" as an extreme value that correlates with the label.</li>
 <li><strong>Label many groups shallowly</strong> rather than few groups deeply: 400 lakes
-&times; 25 frames beats 60 lakes &times; 35 frames at the same labeling cost.</li>
+&times; 25 frames generalizes far better than 60 lakes &times; 35 at the same labeling cost.</li>
 </ul>
 
 </body>
