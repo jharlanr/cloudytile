@@ -123,6 +123,7 @@ python3 "$REPO_DIR/engine/run_cv_grid.py" \
     --config_index "$CONFIG_INDEX" \
     --folds 5 \
     --epochs 100 \
+    --lr_schedule cosine \
     --img_size 256 \
     --num_workers 8 \
     --wandb_project cloudy-tile-cv-finalists

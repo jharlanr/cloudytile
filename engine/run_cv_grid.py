@@ -114,6 +114,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             config={**cfg, "fold": fold, "img_size": args.img_size,
                     "epochs": args.epochs, "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay, "seed": args.seed,
+                    "lr_schedule": args.lr_schedule,
                     "n_bands": len(BAND_SETS[cfg["bands"]])},
             reinit=True,
         )
@@ -158,11 +159,25 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                             weight_decay=args.weight_decay)
         criterion = nn.BCEWithLogitsLoss()
 
+        # At constant lr the tail of the val curve is noisier than the trend it
+        # is meant to reveal: on the 40-epoch grid the mean epoch-to-epoch val
+        # swing was 0.0136 against a total improvement of ~0.0112 over the last
+        # ten epochs. Since the checkpoint is chosen by argmin over that series,
+        # noise that large makes selection partly a lottery. Annealing to ~0
+        # settles the tail so the minimum means something. Default stays "none"
+        # so the completed 40-epoch grid remains reproducible.
+        scheduler = None
+        if args.lr_schedule == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=args.epochs)
+
         best_val, best_state, best_epoch = float("inf"), None, None
         for epoch in range(args.epochs):
             train_loss = train_one_epoch(model, loaders["train"], optimizer,
                                          criterion, device)
             val_loss, val_metrics = evaluate(model, loaders["val"], criterion, device)
+            if scheduler is not None:
+                scheduler.step()
             if val_loss < best_val:
                 best_val, best_epoch = val_loss, epoch + 1
                 best_state = {k: v.detach().cpu().clone()
@@ -174,6 +189,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             if run is not None:
                 wandb.log({"epoch": epoch + 1, "train_loss": train_loss,
                            "val_loss": val_loss,
+                           "lr": optimizer.param_groups[0]["lr"],
                            **{f"val_{k}": v for k, v in val_metrics.items()}})
 
         # Score the checkpoint that would actually be shipped, at an operating
@@ -191,6 +207,8 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         "config": cfg,
         "config_name": config_name(cfg),
         "fold": fold,
+        "epochs": args.epochs,
+        "lr_schedule": args.lr_schedule,
         "best_epoch": best_epoch,
         "best_val_loss": best_val,
         "threshold": threshold,
@@ -271,6 +289,12 @@ def main():
                    help="GAP head is size-agnostic; 256 makes the grid ~4x "
                         "cheaper than 512")
     p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--lr_schedule", type=str, default="none",
+                   choices=["none", "cosine"],
+                   help="'cosine' anneals lr to ~0 over --epochs, which settles "
+                        "the val curve so argmin checkpoint selection is not "
+                        "dominated by epoch-to-epoch noise. Default 'none' "
+                        "reproduces the original 40-epoch grid.")
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--summarize", action="store_true")
