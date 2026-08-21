@@ -52,8 +52,30 @@ class CloudyTileCNN(nn.Module):
             channels = [16, 32, 64]
         if fc_layers is None:
             fc_layers = [128]
-        if head not in ("gap", "flatten"):
-            raise ValueError(f"head must be 'gap' or 'flatten', got {head!r}")
+        # "gap"      -> AdaptiveAvgPool2d(1): one number per channel. Discards
+        #               all spatial layout, and is resolution-independent.
+        # "pool<N>"  -> AdaptiveAvgPool2d(N): an NxN grid per channel, so coarse
+        #               spatial structure survives into the classifier (where in
+        #               the tile the cloud sits, not just how much). Still
+        #               resolution-independent, because adaptive pooling fixes
+        #               the output size regardless of input size. Pair it with a
+        #               narrow fc_layers -- 64x16x16 = 16,384 inputs means an
+        #               fc width of 8 costs 131k weights and a width of 128
+        #               would cost 2.1M.
+        # "flatten"  -> no pooling; first dense layer scales with image AREA.
+        #               Resolution-dependent; kept only for old checkpoints.
+        pool_n = None
+        if head.startswith("pool"):
+            try:
+                pool_n = int(head[4:])
+            except ValueError:
+                raise ValueError(f"head 'pool<N>' needs an integer N, got {head!r}")
+            if pool_n < 1:
+                raise ValueError(f"pool<N> needs N >= 1, got {pool_n}")
+        elif head not in ("gap", "flatten"):
+            raise ValueError(
+                f"head must be 'gap', 'flatten', or 'pool<N>', got {head!r}"
+            )
 
         self.img_size = img_size
         self.channels = channels
@@ -78,6 +100,9 @@ class CloudyTileCNN(nn.Module):
         if head == "gap":
             self.pool = nn.AdaptiveAvgPool2d(1)
             flat_size = channels[-1]
+        elif pool_n is not None:
+            self.pool = nn.AdaptiveAvgPool2d(pool_n)
+            flat_size = channels[-1] * pool_n * pool_n
         else:
             self.pool = None
             # after len(channels) MaxPool2d(2), spatial dims shrink by 2^len

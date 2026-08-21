@@ -73,6 +73,42 @@ class TestModel:
         with pytest.raises(ValueError):
             CloudyTileCNN(head="attention")
 
+    def test_pool_head_is_resolution_independent(self):
+        # the whole point of adaptive pooling: an NxN grid regardless of input,
+        # so a spatial head does not reintroduce the flatten head's dependence
+        # on image area
+        a = CloudyTileCNN(img_size=(256, 256), in_channels=4,
+                          head="pool16", fc_layers=[8])
+        b = CloudyTileCNN(img_size=(512, 512), in_channels=4,
+                          head="pool16", fc_layers=[8])
+        assert a.n_parameters() == b.n_parameters()
+
+    def test_pool_head_forward_and_size(self):
+        m = CloudyTileCNN(in_channels=4, head="pool16", fc_layers=[8])
+        m.eval()
+        # 64 channels x 16 x 16 = 16,384 into an 8-wide hidden layer
+        assert m.state_dict()["classifier.2.weight"].shape == (8, 16384)
+        for s in (128, 512):
+            assert m(torch.zeros(2, 4, s, s)).shape == (2,)
+
+    def test_pool_head_narrow_fc_keeps_it_small(self):
+        # 16x16 spatial x a wide fc is how you accidentally rebuild the 33M
+        # model; the narrow hidden layer is what makes this head affordable
+        narrow = CloudyTileCNN(in_channels=4, head="pool16", fc_layers=[8])
+        wide = CloudyTileCNN(in_channels=4, head="pool16", fc_layers=[128])
+        assert narrow.n_parameters() < 200_000
+        assert wide.n_parameters() > 2_000_000
+
+    def test_pool1_matches_gap(self):
+        p1 = CloudyTileCNN(in_channels=4, head="pool1")
+        gap = CloudyTileCNN(in_channels=4, head="gap")
+        assert p1.n_parameters() == gap.n_parameters()
+
+    def test_rejects_malformed_pool_head(self):
+        for bad in ("poolx", "pool", "pool0", "pool-4"):
+            with pytest.raises(ValueError):
+                CloudyTileCNN(head=bad)
+
 
 class TestNCDataset:
     def test_nan_is_exactly_zero_after_normalization(self, tmp_path):

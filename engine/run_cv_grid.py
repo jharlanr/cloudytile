@@ -79,8 +79,11 @@ GRID = [
 ]
 
 
-def config_name(cfg: dict) -> str:
-    return f"{cfg['bands']}_{cfg['arch']}_lr{cfg['lr']:g}_{cfg['optimizer']}"
+def config_name(cfg: dict, head: str = "gap") -> str:
+    """Result-file and wandb name. The head suffix is omitted for "gap" so that
+    names from earlier grids, which predate the head axis, still match."""
+    base = f"{cfg['bands']}_{cfg['arch']}_lr{cfg['lr']:g}_{cfg['optimizer']}"
+    return base if head == "gap" else f"{base}_{head}"
 
 
 def split_off_val_lakes(train_df: pd.DataFrame, seed: int, val_frac: float = 0.15):
@@ -122,14 +125,16 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
     if WANDB_AVAILABLE and args.wandb_project:
         run = wandb.init(
             project=args.wandb_project,
-            name=f"{config_name(cfg)}_fold{fold}",
-            group=config_name(cfg),
+            name=f"{config_name(cfg, args.head)}_fold{fold}",
+            group=config_name(cfg, args.head),
             job_type="cv",
             tags=[cfg["bands"], cfg["arch"], cfg["optimizer"], f"fold{fold}"],
             config={**cfg, "fold": fold, "img_size": args.img_size,
                     "epochs": args.epochs, "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay, "seed": args.seed,
                     "lr_schedule": args.lr_schedule,
+                    "head": args.head, "fc_layers": args.fc_layers,
+                    "augment": not args.no_augment,
                     "n_bands": len(BAND_SETS[cfg["bands"]])},
             reinit=True,
         )
@@ -150,7 +155,8 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
 
         common = dict(nc_dir=args.nc_dir, channels=channels,
                       img_size=img_size, band_stats=args.band_stats)
-        train_ds = CloudyTileDatasetNC(splits["train"], augment=True, **common)
+        train_ds = CloudyTileDatasetNC(splits["train"],
+                                      augment=not args.no_augment, **common)
         val_ds = CloudyTileDatasetNC(splits["val"], **common)
         test_ds = CloudyTileDatasetNC(splits["test"], **common)
 
@@ -167,6 +173,8 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             img_size=img_size,
             channels=CHANNEL_SETS[cfg["arch"]],
             in_channels=len(channels),
+            head=args.head,
+            fc_layers=args.fc_layers,
         ).to(device)
 
         opt_cls = {"adam": torch.optim.Adam, "adamw": torch.optim.AdamW}[cfg["optimizer"]]
@@ -197,7 +205,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                 best_val, best_epoch = val_loss, epoch + 1
                 best_state = {k: v.detach().cpu().clone()
                               for k, v in model.state_dict().items()}
-            print(f"  [{config_name(cfg)} fold {fold}] epoch {epoch+1}/{args.epochs} "
+            print(f"  [{config_name(cfg, args.head)} fold {fold}] epoch {epoch+1}/{args.epochs} "
                   f"train {train_loss:.4f} val {val_loss:.4f} "
                   f"acc {val_metrics['accuracy']:.3f}")
             sys.stdout.flush()
@@ -220,7 +228,10 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
 
     result = {
         "config": cfg,
-        "config_name": config_name(cfg),
+        "config_name": config_name(cfg, args.head),
+        "head": args.head,
+        "fc_layers": args.fc_layers,
+        "augment": not args.no_augment,
         "fold": fold,
         "epochs": args.epochs,
         "lr_schedule": args.lr_schedule,
@@ -304,6 +315,16 @@ def main():
                    help="GAP head is size-agnostic; 256 makes the grid ~4x "
                         "cheaper than 512")
     p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--head", type=str, default="gap",
+                   help="Classifier head: 'gap' (one number per channel, no "
+                        "spatial layout), 'pool<N>' (NxN grid per channel, so "
+                        "coarse spatial structure reaches the classifier), or "
+                        "'flatten' (legacy, resolution-dependent). Pair "
+                        "pool<N> with a narrow --fc_layers.")
+    p.add_argument("--fc_layers", type=int, nargs="+", default=[128],
+                   help="Hidden widths of the classifier MLP (default 128)")
+    p.add_argument("--no_augment", action="store_true",
+                   help="Disable train-time flips/rot90")
     p.add_argument("--lr_schedule", type=str, default="none",
                    choices=["none", "cosine"],
                    help="'cosine' anneals lr to ~0 over --epochs, which settles "
@@ -370,7 +391,7 @@ def main():
 
     for cfg in configs:
         for fold, train_df, test_df in folds:
-            out_path = out_dir / f"{config_name(cfg)}_fold{fold}.json"
+            out_path = out_dir / f"{config_name(cfg, args.head)}_fold{fold}.json"
             if out_path.exists():
                 print(f"skip existing {out_path.name}")
                 continue
