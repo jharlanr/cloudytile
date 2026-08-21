@@ -137,6 +137,58 @@ class TestModel:
                 CloudyTileCNN(head=bad)
 
 
+class TestBandHeadGrid:
+    """The sweep's configs must build, and the v1 indices must stay frozen."""
+
+    def _grid(self):
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "engine"))
+        import run_cv_grid as R
+        return R
+
+    def test_v1_indices_are_frozen(self):
+        R = self._grid()
+        # recorded in slurm/run_cv_finalists.sh; adding band sets or
+        # architectures must never renumber these
+        assert R.config_name(R.GRID[9]) == "rgb+nir_small_lr0.001_adamw"
+        assert R.config_name(R.GRID[17]) == "rgb+swir16_small_lr0.001_adamw"
+        assert R.config_name(R.GRID[25]) == "all6_small_lr0.001_adamw"
+
+    def test_bandhead_grid_shape(self):
+        R = self._grid()
+        assert len(R.BANDHEAD_GRID) == 16
+        assert {c["head"] for c in R.BANDHEAD_GRID} == set(R.HEADS)
+        assert {c["bands"] for c in R.BANDHEAD_GRID} == set(R.BANDHEAD_BANDS)
+
+    def test_every_config_builds_with_expected_size(self):
+        R = self._grid()
+        expected = {"gap": 228_609, "mixed": 229_657,
+                    "spatial": 228_871, "full": 1_276_401}
+        for cfg in R.BANDHEAD_GRID:
+            if cfg["bands"] != "rgb+nir":      # 4-band reference counts
+                continue
+            h = R.HEADS[cfg["head"]]
+            m = CloudyTileCNN(
+                img_size=(512, 512), channels=R.CHANNEL_SETS[cfg["arch"]],
+                in_channels=len(R.BAND_SETS[cfg["bands"]]), head=h["head"],
+                head_reduce=h["head_reduce"], fc_layers=h["fc_layers"])
+            assert m.n_parameters() == expected[cfg["head"]], cfg
+            m.eval()
+            assert m(torch.zeros(2, 4, 512, 512)).shape == (2,)
+
+    def test_matched_heads_are_within_one_percent(self):
+        R = self._grid()
+        sizes = []
+        for name in ("gap", "mixed", "spatial"):
+            h = R.HEADS[name]
+            sizes.append(CloudyTileCNN(
+                channels=R.CHANNEL_SETS["deep6"], in_channels=4,
+                head=h["head"], head_reduce=h["head_reduce"],
+                fc_layers=h["fc_layers"]).n_parameters())
+        assert (max(sizes) - min(sizes)) / min(sizes) < 0.01
+
+
 class TestNCDataset:
     def test_nan_is_exactly_zero_after_normalization(self, tmp_path):
         csv, nc_dir = make_tiles(tmp_path)

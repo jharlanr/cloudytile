@@ -69,19 +69,70 @@ BAND_SETS = {
     "rgb+nir+swir22": ["red", "green", "blue", "nir", "swir22"],
     "rgb+swir16+swir22": ["red", "green", "blue", "swir16", "swir22"],
 }
-CHANNEL_SETS = {"small": [16, 32, 64], "wide": [32, 64, 128]}
+CHANNEL_SETS = {
+    "small": [16, 32, 64],
+    "wide": [32, 64, 128],
+    # Six blocks. Depth is what buys receptive field -- 22px at 3 blocks vs
+    # 190px at 6, on a 512px tile -- and it is nearly free because blocks 4-6
+    # run on 32x32 and smaller grids: 1.3x the MACs of `small`. Doubling the
+    # FIRST block instead ([32,64,128,...]) costs 4.6x, because that conv runs
+    # at 256x256. Grow channels late.
+    "deep6": [16, 32, 64, 64, 96, 128],
+}
+
+# Named heads. Every one is "reduce to K channels with a 1x1 conv, then average
+# -pool to NxN", so the flattened vector is K*N^2 long. The first three fix that
+# product at 128, which makes them the same size to within 0.5% -- any
+# difference between them is inductive bias, not capacity. "full" deliberately
+# breaks that to probe whether the 128-value bottleneck costs anything; note it
+# widens both the flatten AND the hidden layer, so a win there would need a
+# follow-up to attribute.
+#     head       K     N     values   model (deep6, 4-band)
+#     gap        128   1x1   128        228,609
+#     mixed      8     4x4   128        229,657
+#     spatial    2     8x8   128        228,871
+#     full       128   8x8   8,192    1,276,401
+HEADS = {
+    "gap":     {"head": "gap",   "head_reduce": None, "fc_layers": [8]},
+    "mixed":   {"head": "pool4", "head_reduce": 8,    "fc_layers": [8]},
+    "spatial": {"head": "pool8", "head_reduce": 2,    "fc_layers": [8]},
+    "full":    {"head": "pool8", "head_reduce": None, "fc_layers": [128]},
+}
 LRS = [1e-3, 3e-4]
 OPTIMIZERS = ["adam", "adamw"]
 
+# FROZEN. The v1 grid's index arithmetic (12 configs per band set would be
+# wrong: it is 8 = 2 archs x 2 lrs x 2 optimizers) is recorded in slurm scripts
+# and in the finalist config list, so GRID must be built from an explicit arch
+# list rather than from CHANNEL_SETS -- otherwise adding an architecture such as
+# deep6 silently renumbers every existing index.
+V1_ARCHS = ["small", "wide"]
+
 GRID = [
     {"bands": b, "arch": a, "lr": lr, "optimizer": opt}
-    for b, a, lr, opt in itertools.product(BAND_SETS, CHANNEL_SETS, LRS, OPTIMIZERS)
+    for b, a, lr, opt in itertools.product(BAND_SETS, V1_ARCHS, LRS, OPTIMIZERS)
 ]
+
+
+# The bands x heads sweep. Architecture, lr and optimizer are fixed at values
+# already measured twice and found null, so the only axes left are the two open
+# questions: which bands, and how the head trades channel context against
+# spatial context. Kept separate from GRID so that grid's indices -- and the
+# finalist config list recorded against them -- stay frozen.
+BANDHEAD_BANDS = ["rgb", "rgb+nir", "rgb+swir16", "rgb+swir22"]
+BANDHEAD_GRID = [
+    {"bands": b, "head": h, "arch": "deep6", "lr": 1e-3, "optimizer": "adamw"}
+    for b, h in itertools.product(BANDHEAD_BANDS, HEADS)
+]
+
+GRIDS = {"v1": GRID, "bandhead": BANDHEAD_GRID}
 
 
 def config_name(cfg: dict, head: str = "gap") -> str:
     """Result-file and wandb name. The head suffix is omitted for "gap" so that
     names from earlier grids, which predate the head axis, still match."""
+    if "head" in cfg:                      # bands x heads sweep
+        return f"{cfg['bands']}_{cfg['head']}"
     base = f"{cfg['bands']}_{cfg['arch']}_lr{cfg['lr']:g}_{cfg['optimizer']}"
     return base if head == "gap" else f"{base}_{head}"
 
@@ -133,12 +184,19 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                     "epochs": args.epochs, "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay, "seed": args.seed,
                     "lr_schedule": args.lr_schedule,
-                    "head": args.head, "head_reduce": args.head_reduce,
-                    "fc_layers": args.fc_layers,
+                    **{f"head_{k}" if k != "head" else "head_spec": v
+                       for k, v in hcfg.items()},
                     "augment": not args.no_augment,
                     "n_bands": len(BAND_SETS[cfg["bands"]])},
             reinit=True,
         )
+
+    # A config from BANDHEAD_GRID names its head; one from GRID predates the
+    # head axis and takes it from the CLI.
+    hcfg = HEADS[cfg["head"]] if "head" in cfg else {
+        "head": args.head, "head_reduce": args.head_reduce,
+        "fc_layers": args.fc_layers,
+    }
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     channels = BAND_SETS[cfg["bands"]]
@@ -174,9 +232,9 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             img_size=img_size,
             channels=CHANNEL_SETS[cfg["arch"]],
             in_channels=len(channels),
-            head=args.head,
-            head_reduce=args.head_reduce,
-            fc_layers=args.fc_layers,
+            head=hcfg["head"],
+            head_reduce=hcfg["head_reduce"],
+            fc_layers=hcfg["fc_layers"],
         ).to(device)
 
         opt_cls = {"adam": torch.optim.Adam, "adamw": torch.optim.AdamW}[cfg["optimizer"]]
@@ -231,9 +289,8 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
     result = {
         "config": cfg,
         "config_name": config_name(cfg, args.head),
-        "head": args.head,
-        "head_reduce": args.head_reduce,
-        "fc_layers": args.fc_layers,
+        "head": cfg.get("head", args.head),
+        "head_spec": hcfg,
         "augment": not args.no_augment,
         "fold": fold,
         "epochs": args.epochs,
@@ -306,6 +363,10 @@ def main():
                    help="Directory of per-tile .nc files")
     p.add_argument("--band_stats", type=str, default=None)
     p.add_argument("--out_dir", type=str, required=True)
+    p.add_argument("--grid", type=str, default="v1", choices=sorted(GRIDS),
+                   help="'v1' is the original bands x width x lr x optimizer "
+                        "product (indices frozen); 'bandhead' is the 4 bands x "
+                        "4 heads sweep at fixed architecture.")
     p.add_argument("--config_index", type=int, default=-1,
                    help=f"0..{len(GRID)-1} for one config (SLURM array), "
                         f"-1 for all sequentially")
@@ -371,9 +432,12 @@ def main():
 
     from cloudytile.splits import dev_labels, lake_group_kfold
 
-    configs = GRID if args.config_index < 0 else [GRID[args.config_index]]
-    print(f"{len(GRID)} configs in grid; running {len(configs)} "
+    grid = GRIDS[args.grid]
+    configs = grid if args.config_index < 0 else [grid[args.config_index]]
+    print(f"grid '{args.grid}': {len(grid)} configs; running {len(configs)} "
           f"x {args.folds} folds at {args.img_size}px")
+    for c in configs:
+        print(f"  -> {config_name(c, args.head)}  {c}")
 
     # Restrict selection to the development lakes. Without this the grid folds
     # over every lake, and picking the best of 32 configs by fold score is
