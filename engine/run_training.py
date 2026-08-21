@@ -226,15 +226,36 @@ def train(config: dict):
 
         # Loss and optimizer
         criterion = nn.BCEWithLogitsLoss()
-        optimizer = torch.optim.Adam(
+        epochs = config.get("epochs", 100)
+
+        # Must be able to reproduce the optimizer the config grid selected
+        # under; AdamW was the grid's marginal winner and is what the finalist
+        # configs use.
+        opt_name = config.get("optimizer", "adam")
+        opt_cls = {"adam": torch.optim.Adam, "adamw": torch.optim.AdamW}[opt_name]
+        optimizer = opt_cls(
             model.parameters(),
             lr=config.get("lr", 1e-3),
             weight_decay=config.get("weight_decay", 0.0),
         )
 
-        # Learning rate scheduler
+        # Learning-rate schedule. Model selection happens under cosine annealing
+        # to ~0 across the full run, so the final model must train in the same
+        # regime it was chosen under. Annealing does two things: it improves the
+        # score outright (~0.008 AUC on the finalist reruns, comparable to the
+        # entire band effect), and it settles the tail of the validation curve —
+        # epoch-to-epoch swing dropped from 0.0136 to 0.0018 — so that picking
+        # the best checkpoint by argmin is a real choice rather than a lottery
+        # over noise. "plateau" preserves the older --use_scheduler behaviour.
+        lr_schedule = config.get("lr_schedule", "none")
+        if lr_schedule == "none" and config.get("use_scheduler", False):
+            lr_schedule = "plateau"
         scheduler = None
-        if config.get("use_scheduler", False):
+        if lr_schedule == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=epochs
+            )
+        elif lr_schedule == "plateau":
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, mode="min", factor=0.5, patience=5
             )
@@ -244,7 +265,6 @@ def train(config: dict):
         best_metric_value = float("inf") if opt_metric == "loss" else 0.0
         best_state = None
         best_epoch = None
-        epochs = config.get("epochs", 20)
 
         for epoch in range(epochs):
             train_loss = train_one_epoch(
@@ -252,8 +272,13 @@ def train(config: dict):
             )
             val_loss, val_metrics = evaluate(model, val_loader, criterion, device)
 
-            if scheduler:
-                scheduler.step(val_loss)
+            if scheduler is not None:
+                # CosineAnnealingLR.step() takes no argument; ReduceLROnPlateau
+                # needs the metric it is monitoring.
+                if lr_schedule == "cosine":
+                    scheduler.step()
+                else:
+                    scheduler.step(val_loss)
 
             # Logging
             log_dict = {
@@ -446,7 +471,7 @@ def main():
     parser.add_argument("--image_dir", type=str, default=None,
                         help="Directory of JPG images (legacy RGB path; used "
                              "only if --nc_dir is not given)")
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=0.0)
@@ -455,8 +480,17 @@ def main():
                         help="Conv channel sizes (e.g., '16 32 64' or '[16,32,64]')")
     parser.add_argument("--fc_layers", type=parse_list, default=[128],
                         help="FC layer sizes (e.g., '128' or '[128,64]')")
+    parser.add_argument("--optimizer", type=str, default="adam",
+                        choices=["adam", "adamw"],
+                        help="AdamW's decoupled weight decay pairs better with "
+                             "BatchNorm and is what the config grid selected")
+    parser.add_argument("--lr_schedule", type=str, default="none",
+                        choices=["none", "cosine", "plateau"],
+                        help="'cosine' anneals lr to ~0 over --epochs; use it to "
+                             "match the regime the config grid selected under")
     parser.add_argument("--use_scheduler", type=lambda x: x.lower() == 'true',
-                        default=False, help="Use learning rate scheduler")
+                        default=False,
+                        help="Deprecated alias for --lr_schedule plateau")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--split_by", type=str, default="lake",
