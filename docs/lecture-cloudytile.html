@@ -494,19 +494,45 @@ stays fixed at 128 makes the three heads directly comparable:
 <figcaption>The same operation three ways: reduce to <em>K</em> channels, pool to
 <em>N</em>&#215;<em>N</em>. All three land on <strong>128 values</strong> feeding an identical
 classifier, so the models differ by under 0.5% in size &mdash; what changes is only how those 128
-numbers are split between knowing <em>what</em> and knowing <em>where</em>.</figcaption>
+numbers are split between knowing <em>what</em> and knowing <em>where</em>. A fourth head,
+<code>full</code>, deliberately breaks this matching; it is described below.</figcaption>
 </figure>
 <table>
 <tr><th>head</th><th>K channels</th><th>N grid</th><th>values</th><th>model params</th><th>what it keeps</th></tr>
 <tr><td><code>gap</code></td><td class="num">128</td><td class="num">1&times;1</td><td class="num">128</td><td class="num">228,609</td><td><em>what</em> features are present; no location</td></tr>
 <tr><td><code>mixed</code></td><td class="num">8</td><td class="num">4&times;4</td><td class="num">128</td><td class="num">229,657</td><td>8 feature groups on a coarse map</td></tr>
 <tr><td><code>spatial</code></td><td class="num">2</td><td class="num">8&times;8</td><td class="num">128</td><td class="num">228,871</td><td>2 usability maps at the full grid</td></tr>
+<tr><td><code>full</code></td><td class="num">128</td><td class="num">8&times;8</td><td class="num"><span class="danger-text">8,192</span></td><td class="num"><span class="danger-text">1,276,401</span></td><td>everything, plus a 128-unit hidden layer</td></tr>
 </table>
 <p>
-The three models differ in size by <strong>0.46%</strong>, because the head costs one to two
+The first three models differ in size by <strong>0.46%</strong>, because the head costs one to two
 thousand parameters against a 227,568-parameter stack. So any difference between them is
 attributable to <em>inductive bias</em> rather than capacity &mdash; the confound that made
 earlier width comparisons uninterpretable.
+</p>
+
+<h4>The capacity probe</h4>
+<p>
+<code>full</code> is the deliberate exception: it keeps all 128 channels at the full 8&times;8
+grid, flattens to <strong>8,192</strong> values, and feeds a 128-unit hidden layer. At
+<strong>1,276,401</strong> parameters it is 5.6&times; the others, and it exists to answer a
+question the matched heads cannot: <em>is the 128-value bottleneck costing anything?</em>
+</p>
+<p>
+Every capacity result so far concerned the <em>convolutional stack</em>, where widening was
+measured twice and made no difference. Head capacity is untested, and it is where this
+architecture has failed before. It costs nothing extra to run &mdash; a
+8,192&thinsp;&times;&thinsp;128 matrix multiply is 1.0M operations against the stack's 248M, so
+epoch time is unchanged.
+</p>
+<p>
+Two caveats. It widens the flattened input <em>and</em> the hidden layer at once, so a win would
+not say which mattered; the follow-up would be the same head with 8 hidden units. And at 199
+parameters per training tile against 36 for the others, it is by far the most overfit-prone
+configuration in the sweep, defended only by dropout. That is a safe failure mode rather than a
+dangerous one: restoring the best-validation checkpoint means overfitting simply selects an early
+epoch and the config lands mid-table. The experiment can produce an uninformative loss, but not a
+false win.
 </p>
 
 <h3>Why the flattened width, not the hidden width, sets the cost</h3>
@@ -708,7 +734,7 @@ fold and are read only by the final model. A fold reporting
 
 <h3>The grid</h3>
 <p>
-Twelve configurations &mdash; <strong>4 band sets &times; 3 heads</strong> &mdash; each scored on
+Sixteen configurations &mdash; <strong>4 band sets &times; 4 heads</strong> &mdash; each scored on
 5 identical lake-grouped folds. Folds are a function of <code>(labels, n_folds, seed)</code>
 alone, so two configurations always differ by architecture, never by data.
 </p>
@@ -716,6 +742,7 @@ alone, so two configurations always differ by architecture, never by data.
 <tr><th>axis</th><th>values</th><th>the question it answers</th></tr>
 <tr><td><code>bands</code></td><td><code>rgb</code>, <code>rgb+nir</code>, <code>rgb+swir16</code>, <code>rgb+swir22</code></td><td>Does any single non-visible band help, and does it matter which?</td></tr>
 <tr><td><code>head</code></td><td><code>gap</code>, <code>mixed</code>, <code>spatial</code></td><td>Is usability a property of the tile as a whole, or of where the cloud sits?</td></tr>
+<tr><td></td><td><code>full</code></td><td>Does the 128-value bottleneck cost anything? (5.6&times; the parameters, same runtime)</td></tr>
 </table>
 <p>
 The band question has a physical basis: SWIR varies far more than the visible bands &mdash;
