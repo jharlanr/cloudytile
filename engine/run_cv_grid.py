@@ -169,6 +169,14 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
     torch.manual_seed(args.seed + fold)
     np.random.seed(args.seed + fold)
 
+    # A config from BANDHEAD_GRID names its head; one from GRID predates the
+    # head axis and takes it from the CLI. Resolved before wandb.init, which
+    # logs it.
+    hcfg = HEADS[cfg["head"]] if "head" in cfg else {
+        "head": args.head, "head_reduce": args.head_reduce,
+        "fc_layers": args.fc_layers,
+    }
+
     # One wandb run per (config, fold), grouped by config so the UI averages
     # folds natively. Compute nodes have no internet: WANDB_MODE=offline is set
     # by the SLURM wrapper, and runs are synced from a login node afterwards.
@@ -190,13 +198,6 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                     "n_bands": len(BAND_SETS[cfg["bands"]])},
             reinit=True,
         )
-
-    # A config from BANDHEAD_GRID names its head; one from GRID predates the
-    # head axis and takes it from the CLI.
-    hcfg = HEADS[cfg["head"]] if "head" in cfg else {
-        "head": args.head, "head_reduce": args.head_reduce,
-        "fc_layers": args.fc_layers,
-    }
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     channels = BAND_SETS[cfg["bands"]]

@@ -189,6 +189,105 @@ class TestBandHeadGrid:
         assert (max(sizes) - min(sizes)) / min(sizes) < 0.01
 
 
+class TestRunOneSmoke:
+    """
+    Actually execute one (config, fold) end to end.
+
+    The bands x heads sweep died on all 16 array tasks in under a minute
+    because run_one read a variable in the wandb.init config block that was
+    not assigned until after it -- an UnboundLocalError that only fires when
+    wandb is present, which no test exercised. Every unit test above builds
+    models and datasets in isolation; none had ever run the function that
+    wires them together. This one does, with wandb stubbed so the branch that
+    broke is the branch under test.
+    """
+
+    def _args(self, nc_dir, **over):
+        import argparse
+        a = dict(seed=0, head="gap", head_reduce=None, fc_layers=[8],
+                 wandb_project="smoke", img_size=64, epochs=1, batch_size=4,
+                 weight_decay=1e-4, lr_schedule="cosine", no_augment=True,
+                 nc_dir=nc_dir, band_stats=STATS, num_workers=0,
+                 threshold_objective="f1", target_precision=0.9)
+        a.update(over)
+        return argparse.Namespace(**a)
+
+    @pytest.mark.parametrize("head", ["gap", "mixed", "spatial", "full"])
+    def test_one_fold_runs_end_to_end(self, tmp_path, head, monkeypatch):
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "engine"))
+        import run_cv_grid as R
+        from cloudytile.splits import add_lake_id
+
+        # force the wandb path on even where wandb is not installed: the bug
+        # lived inside `if WANDB_AVAILABLE and args.wandb_project`
+        logged = []
+
+        final = {}
+
+        class FakeWandb:
+            summary = final  # run_one writes final metrics via wandb.summary
+
+            @staticmethod
+            def init(**kw):
+                logged.append(kw["config"])
+                return object()
+
+            @staticmethod
+            def log(d):
+                pass
+
+            @staticmethod
+            def finish():
+                logged.append("finish")
+
+        monkeypatch.setattr(R, "wandb", FakeWandb, raising=False)
+        monkeypatch.setattr(R, "WANDB_AVAILABLE", True, raising=False)
+
+        csv, nc_dir = make_tiles(tmp_path, n=24, size=64, nan_frac=0.1)
+        df = add_lake_id(pd.read_csv(csv))
+        lakes = np.sort(df["lake_id"].unique())
+        train_df = df[df["lake_id"].isin(lakes[:-2])].reset_index(drop=True)
+        test_df = df[df["lake_id"].isin(lakes[-2:])].reset_index(drop=True)
+
+        cfg = {"bands": "rgb+nir", "arch": "deep6", "lr": 1e-3,
+               "optimizer": "adamw", "head": head}
+        result = R.run_one(cfg, 0, train_df, test_df, self._args(nc_dir))
+
+        assert result["head"] == head
+        assert result["head_spec"] == R.HEADS[head]
+        assert result["best_epoch"] == 1
+        assert 0.0 <= result["test_accuracy"] <= 1.0
+        assert result["n_parameters"] > 0
+        # the wandb config must carry the resolved head, not a placeholder
+        assert logged[0]["head_spec"] == R.HEADS[head]["head"]
+        assert logged[-1] == "finish"
+        assert final["test_auc"] == result["test_auc"]
+
+    def test_v1_config_without_head_takes_it_from_cli(self, tmp_path, monkeypatch):
+        # GRID configs predate the head axis; run_one must fall back to flags
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "engine"))
+        import run_cv_grid as R
+        from cloudytile.splits import add_lake_id
+
+        monkeypatch.setattr(R, "WANDB_AVAILABLE", False, raising=False)
+        csv, nc_dir = make_tiles(tmp_path, n=24, size=64, nan_frac=0.1)
+        df = add_lake_id(pd.read_csv(csv))
+        lakes = np.sort(df["lake_id"].unique())
+        train_df = df[df["lake_id"].isin(lakes[:-2])].reset_index(drop=True)
+        test_df = df[df["lake_id"].isin(lakes[-2:])].reset_index(drop=True)
+
+        cfg = R.GRID[9]  # rgb+nir_small_lr0.001_adamw, no "head" key
+        assert "head" not in cfg
+        result = R.run_one(cfg, 0, train_df, test_df,
+                           self._args(nc_dir, head="gap", fc_layers=[128]))
+        assert result["head"] == "gap"
+        assert result["head_spec"]["fc_layers"] == [128]
+
+
 class TestNCDataset:
     def test_nan_is_exactly_zero_after_normalization(self, tmp_path):
         csv, nc_dir = make_tiles(tmp_path)
