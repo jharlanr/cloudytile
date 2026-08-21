@@ -48,11 +48,26 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
+# RGB is always present -- it is the modality the task is defined on -- so the
+# band question is which subset of the three non-visible bands to add. These
+# eight entries are that complete lattice.
+#
+# ORDER IS LOAD-BEARING. GRID is itertools.product(BAND_SETS, ...) with bands
+# outermost, so a config's index is 8*band + 4*arch + 2*lr + optimizer. New
+# band sets must therefore be APPENDED, never inserted or reordered: appending
+# leaves every existing index untouched (verified for the 32-config v1 grid and
+# the finalist index list) while inserting would silently re-point them.
+# "all6" keeps its original name rather than becoming "rgb+nir+swir16+swir22"
+# for the same reason -- results are matched by config_name.
 BAND_SETS = {
     "rgb": ["red", "green", "blue"],
     "rgb+nir": ["red", "green", "blue", "nir"],
     "rgb+swir16": ["red", "green", "blue", "swir16"],
     "all6": ["red", "green", "blue", "nir", "swir16", "swir22"],
+    "rgb+swir22": ["red", "green", "blue", "swir22"],
+    "rgb+nir+swir16": ["red", "green", "blue", "nir", "swir16"],
+    "rgb+nir+swir22": ["red", "green", "blue", "nir", "swir22"],
+    "rgb+swir16+swir22": ["red", "green", "blue", "swir16", "swir22"],
 }
 CHANNEL_SETS = {"small": [16, 32, 64], "wide": [32, 64, 128]}
 LRS = [1e-3, 3e-4]
