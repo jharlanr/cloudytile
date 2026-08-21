@@ -424,6 +424,145 @@ changes capacity, and it is a 3.4&times; jump. Both are small enough that the wh
 comfortably on one GPU.
 </p>
 
+<h3>Two classifier heads</h3>
+<p>
+The conv stack turns a 512&times;512 tile into <strong>64 channels of 64&times;64</strong>. The
+head's job is to get from that block to one number. How much of the block it keeps is a real
+modelling choice, and the two options differ only in one argument: how finely they pool.
+</p>
+<figure>
+<svg viewBox="0 0 940 330" role="img" aria-label="One of the 64 feature channels is a 64 by 64 map. Global average pooling averages the whole map to a single value, giving 64 numbers across all channels. Pooling to 16 by 16 averages each 4 by 4 block instead, keeping a coarse map of 256 values per channel and 16,384 numbers across all channels.">
+  <defs>
+    <marker id="arrh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="112" y="64" font-size="12.5" fill="currentColor" text-anchor="middle">one of 64 channels</text>
+  <text x="112" y="82" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.7">64 &times; 64 after the conv stack</text>
+  <rect x="40" y="100" width="144" height="144" fill="currentColor" opacity="0.13"/>
+  <g stroke="currentColor" stroke-width="0.7" opacity="0.45">
+    <line x1="58"  y1="100" x2="58"  y2="244"/><line x1="76"  y1="100" x2="76"  y2="244"/>
+    <line x1="94"  y1="100" x2="94"  y2="244"/><line x1="112" y1="100" x2="112" y2="244"/>
+    <line x1="130" y1="100" x2="130" y2="244"/><line x1="148" y1="100" x2="148" y2="244"/>
+    <line x1="166" y1="100" x2="166" y2="244"/>
+    <line x1="40" y1="118" x2="184" y2="118"/><line x1="40" y1="136" x2="184" y2="136"/>
+    <line x1="40" y1="154" x2="184" y2="154"/><line x1="40" y1="172" x2="184" y2="172"/>
+    <line x1="40" y1="190" x2="184" y2="190"/><line x1="40" y1="208" x2="184" y2="208"/>
+    <line x1="40" y1="226" x2="184" y2="226"/>
+  </g>
+  <rect x="40" y="100" width="144" height="144" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrh)">
+    <path d="M190,140 C 240,140 250,84 292,84"/>
+    <path d="M190,205 C 240,205 250,238 292,238"/>
+  </g>
+  <text x="243" y="72" font-size="10.5" fill="var(--good)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">AdaptiveAvgPool2d(1)</text>
+  <text x="243" y="268" font-size="10.5" fill="var(--accent)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">AdaptiveAvgPool2d(16)</text>
+  <rect x="298" y="64" width="40" height="40" fill="var(--good)" opacity="0.85"/>
+  <rect x="298" y="64" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <text x="318" y="122" font-size="11.5" fill="currentColor" text-anchor="middle">1 value</text>
+  <rect x="298" y="178" width="120" height="120" fill="var(--accent)" opacity="0.7"/>
+  <g stroke="var(--bg)" stroke-width="1.1">
+    <line x1="328" y1="178" x2="328" y2="298"/><line x1="358" y1="178" x2="358" y2="298"/>
+    <line x1="388" y1="178" x2="388" y2="298"/>
+    <line x1="298" y1="208" x2="418" y2="208"/><line x1="298" y1="238" x2="418" y2="238"/>
+    <line x1="298" y1="268" x2="418" y2="268"/>
+  </g>
+  <rect x="298" y="178" width="120" height="120" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <text x="358" y="316" font-size="11.5" fill="currentColor" text-anchor="middle">16 &times; 16 = 256 values</text>
+  <g font-size="12.5" fill="currentColor">
+    <text x="450" y="80">&times; 64 channels</text>
+    <text x="450" y="242">&times; 64 channels</text>
+  </g>
+  <text x="640" y="80" font-size="15" fill="var(--good)" font-weight="600">64 numbers</text>
+  <text x="640" y="242" font-size="15" fill="var(--accent)" font-weight="600">16,384 numbers</text>
+  <text x="640" y="100" font-size="11" fill="currentColor" opacity="0.7">head = "gap"</text>
+  <text x="640" y="262" font-size="11" fill="currentColor" opacity="0.7">head = "pool16"</text>
+</svg>
+<figcaption>Both heads average &mdash; they differ only in how many cells they average
+<em>into</em>. GAP collapses each channel to its mean, so a tile half-covered by thick cloud and
+a tile under uniform haze can produce the same descriptor. Pooling to 16&times;16 keeps a coarse
+map, so <em>where</em> the cloud sits survives into the classifier. Both are resolution-independent:
+adaptive pooling fixes the output grid whatever the input size.</figcaption>
+</figure>
+
+<h4>Why the wider input costs so much more</h4>
+<p>
+That pooled block is flattened into a vector and fed to a <strong>fully connected</strong> layer
+&mdash; every input value gets its own weight to every hidden unit. So the weight count is not the
+number of inputs, nor the number of hidden units, but their <em>product</em>:
+</p>
+<figure>
+<svg viewBox="0 0 940 360" role="img" aria-label="Two fully connected layers compared. With the GAP head, 64 inputs connect to 128 hidden units, giving 64 times 128 equals 8,192 weights. With the pool16 head, 16,384 inputs connect to only 8 hidden units, giving 16,384 times 8 equals 131,072 weights — sixteen times more despite having far fewer hidden units.">
+  <g font-size="13" fill="currentColor" font-weight="600">
+    <text x="60" y="30">head = "gap"</text>
+    <text x="530" y="30">head = "pool16"</text>
+  </g>
+  <g stroke="currentColor" stroke-width="0.5" opacity="0.42">
+    <line x1="110" y1="90" x2="250" y2="105"/><line x1="110" y1="90" x2="250" y2="150"/><line x1="110" y1="90" x2="250" y2="195"/><line x1="110" y1="90" x2="250" y2="240"/>
+    <line x1="110" y1="135" x2="250" y2="105"/><line x1="110" y1="135" x2="250" y2="150"/><line x1="110" y1="135" x2="250" y2="195"/><line x1="110" y1="135" x2="250" y2="240"/>
+    <line x1="110" y1="180" x2="250" y2="105"/><line x1="110" y1="180" x2="250" y2="150"/><line x1="110" y1="180" x2="250" y2="195"/><line x1="110" y1="180" x2="250" y2="240"/>
+    <line x1="110" y1="225" x2="250" y2="105"/><line x1="110" y1="225" x2="250" y2="150"/><line x1="110" y1="225" x2="250" y2="195"/><line x1="110" y1="225" x2="250" y2="240"/>
+  </g>
+  <g fill="var(--good)" stroke="currentColor" stroke-width="1">
+    <circle cx="110" cy="90" r="10"/><circle cx="110" cy="135" r="10"/><circle cx="110" cy="180" r="10"/><circle cx="110" cy="225" r="10"/>
+  </g>
+  <g fill="currentColor" opacity="0.3">
+    <circle cx="250" cy="105" r="11"/><circle cx="250" cy="150" r="11"/><circle cx="250" cy="195" r="11"/><circle cx="250" cy="240" r="11"/>
+  </g>
+  <g font-size="18" fill="currentColor" text-anchor="middle" opacity="0.6">
+    <text x="110" y="262">&#8942;</text><text x="250" y="275">&#8942;</text>
+  </g>
+  <g font-size="12" fill="currentColor" text-anchor="middle">
+    <text x="110" y="300">64 inputs</text>
+    <text x="250" y="308">128 hidden</text>
+  </g>
+  <text x="180" y="338" font-size="14" fill="var(--good)" text-anchor="middle" font-weight="600">64 &times; 128 = 8,192</text>
+  <line x1="470" y1="20" x2="470" y2="345" stroke="currentColor" stroke-width="1" opacity="0.25"/>
+  <g stroke="currentColor" stroke-width="0.5" opacity="0.42">
+    <line x1="580" y1="90" x2="720" y2="150"/><line x1="580" y1="90" x2="720" y2="195"/>
+    <line x1="580" y1="135" x2="720" y2="150"/><line x1="580" y1="135" x2="720" y2="195"/>
+    <line x1="580" y1="180" x2="720" y2="150"/><line x1="580" y1="180" x2="720" y2="195"/>
+    <line x1="580" y1="225" x2="720" y2="150"/><line x1="580" y1="225" x2="720" y2="195"/>
+  </g>
+  <g fill="var(--accent)" stroke="currentColor" stroke-width="1">
+    <circle cx="580" cy="90" r="10"/><circle cx="580" cy="135" r="10"/><circle cx="580" cy="180" r="10"/><circle cx="580" cy="225" r="10"/>
+  </g>
+  <g fill="currentColor" opacity="0.3">
+    <circle cx="720" cy="150" r="11"/><circle cx="720" cy="195" r="11"/>
+  </g>
+  <g font-size="18" fill="currentColor" text-anchor="middle" opacity="0.6">
+    <text x="580" y="262">&#8942;</text>
+  </g>
+  <g font-size="12" fill="currentColor" text-anchor="middle">
+    <text x="580" y="300">16,384 inputs</text>
+    <text x="720" y="232">8 hidden</text>
+  </g>
+  <text x="650" y="338" font-size="14" fill="var(--accent)" text-anchor="middle" font-weight="600">16,384 &times; 8 = 131,072</text>
+</svg>
+<figcaption>Yes &mdash; it is still an ordinary fully connected layer in both cases; only its input
+width changes. <code>pool16</code> has <em>sixteen times fewer</em> hidden units than
+<code>gap</code> and still carries sixteen times more weights, because 256&times; more inputs
+swamps 16&times; fewer units. The narrow hidden layer is not a detail: it is the only thing
+keeping this head affordable.</figcaption>
+</figure>
+<p>
+Which is why the hidden width has to shrink when the head widens. The same
+<code>pool16</code> block behind a 128-unit layer would rebuild the problem the GAP head was
+adopted to solve:
+</p>
+<table>
+<tr><th>head</th><th>flattened inputs</th><th>hidden units</th><th>weights in that layer</th><th>whole model</th></tr>
+<tr><td><code>gap</code></td><td class="num">64</td><td class="num">128</td><td class="num">8,192</td><td class="num">32,401</td></tr>
+<tr><td><code>pool16</code></td><td class="num">16,384</td><td class="num">8</td><td class="num">131,072</td><td class="num">155,041</td></tr>
+<tr><td><code>pool16</code> <span class="danger-text">with 128 hidden</span></td><td class="num">16,384</td><td class="num">128</td><td class="num"><span class="danger-text">2,097,152</span></td><td class="num"><span class="danger-text">2,121,361</span></td></tr>
+</table>
+<p>
+Counts are for a four-band input. Which head is better is an open question &mdash; GAP assumes
+usability is a property of the tile as a whole, <code>pool16</code> assumes the spatial
+arrangement carries information &mdash; and the two are being compared directly in the current
+sweep.
+</p>
+
 <h2>6. Baselines any model must beat</h2>
 <p>
 Fit on the 320 development lakes and scored on the 80 frozen test lakes (2,000 frames, 67.5%
