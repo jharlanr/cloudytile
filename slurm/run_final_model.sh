@@ -22,11 +22,22 @@
 # fold spread, take the simpler model -- selects it.
 #
 # EVERY hyperparameter below is passed explicitly rather than left to a
-# default, because run_training.py's defaults do NOT match the regime the
-# config grid selected under: it defaults to img_size 512 (grid used 256),
-# weight_decay 0.0 (grid used 1e-4), and optimizer adam (winner uses adamw).
-# A model evaluated in a different regime than it was chosen in is not the
-# model that was chosen.
+# default, because run_training.py's defaults did NOT match the config grid:
+# weight_decay defaults to 0.0 (grid used 1e-4) and optimizer to adam (the
+# winner uses adamw, and until recently there was no --optimizer flag at all).
+#
+# RESOLUTION IS THE ONE DELIBERATE DIFFERENCE. The grid and finalist reruns ran
+# at 256 px purely for throughput -- the GAP head is resolution-independent, so
+# the model is byte-for-byte the same 32,401 parameters at either size, and the
+# plan was always to cash the winner out at full resolution. 512 px is also
+# what inference uses everywhere (cloudytile/inference.py, run_inference.py,
+# run_inference_lakes.sh all use 512), so training at 256 would ship a
+# train/inference resolution mismatch. Train at what you infer at.
+#
+# Caveat worth stating in the paper: 256 vs 512 was never itself an axis in the
+# grid, so this transfers the winning config to a resolution it was not
+# compared at. It is the right call because inference binds, but it is an
+# assumption, not a measured result.
 #
 # ON RUNNING THIS MORE THAN ONCE: re-running after a crash costs nothing -- a
 # failed run teaches you nothing about the test lakes. What does spend the
@@ -35,7 +46,8 @@
 # model genuinely has to change after seeing test results, freeze a
 # splits/cloudytile_v2 and start the holdout over.
 #
-# Cost: ~14 s/epoch x 100 epochs on 7,000 training tiles ~ 30 min.
+# Cost: 512 px is 4x the pixels of the grid's 256, so ~55 s/epoch x 100
+# epochs on 7,000 training tiles ~ 1.5-2 h, inside the 6 h walltime.
 # =============================================================================
 
 ml system
@@ -72,7 +84,7 @@ python3 "$REPO_DIR/engine/run_training.py" \
     --fc_layers 128 \
     --head gap \
     --dropout 0.3 \
-    --img_size 256 \
+    --img_size 512 \
     --batch_size 32 \
     --epochs 100 \
     --lr 0.001 \
