@@ -2,7 +2,7 @@
 #SBATCH --job-name=cv_bandhead
 #SBATCH --output=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs/%x_%A_%a.out
 #SBATCH --error=/oak/stanford/groups/cyaolai/JoshRines/sherlock/sherlock_cloudytile/logs/%x_%A_%a.err
-#SBATCH --time=30:00:00
+#SBATCH --time=48:00:00
 #SBATCH -p serc
 #SBATCH --gpus=1
 #SBATCH --nodes=1
@@ -53,10 +53,18 @@
 # ranking that --summarize cannot detect. Resume is per (config, fold): a task
 # killed partway loses at most the fold in flight.
 #
-# Cost: ~71 s/epoch at 512 px (head FLOPs are negligible next to the stack's
-# 248M MACs, so all four heads cost the same). 5 folds x 200 epochs ~ 19.7 h per
-# task; 16 tasks 4-concurrent ~ 79 h wall, ~315 A100-hours. The 30 h walltime
-# leaves ~1.5x headroom per task.
+# COST, from the finalists run rather than from a FLOP estimate. That run timed
+# 17.0-39.4 min/fold at 100 epochs / 256 px / 3 blocks -- note the 2.3x spread
+# across configs doing nominally identical work, which is node contention, not
+# architecture. Scaling the range by 2 (epochs) x 4 (512 px is 4x the pixels)
+# x 1.3 (deep6 MACs) gives 2.9-6.8 h/fold, so 15-34 h per 5-fold task. The old
+# 30 h walltime sat inside that range: the slow tail would have been killed at
+# fold 4. Hence 48 h. 16 tasks 4-concurrent is ~60-135 h wall.
+#
+# A walltime kill is survivable but not free: resume is per (config, fold), so
+# re-running sbatch skips finished folds and loses only the fold in flight.
+# Watch the "projected N h/fold" line each task prints after its first epoch --
+# that is the real number, available in minute one rather than hour thirty.
 #
 # Aggregate from a LOGIN node when it finishes:
 #   python3 engine/run_cv_grid.py --out_dir <OUT_DIR> --summarize

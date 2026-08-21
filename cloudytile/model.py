@@ -77,6 +77,15 @@ class CloudyTileCNN(nn.Module):
             raise ValueError(
                 f"head must be 'gap', 'flatten', or 'pool<N>', got {head!r}"
             )
+        # head_reduce only has meaning ahead of a pool<N> grid. Silently
+        # ignoring it elsewhere is how a run gets named for one architecture and
+        # trains another: "spatial" IS head_reduce=2, so dropping it on the
+        # floor would build a 16x-wider head under the winning config's name.
+        if head_reduce is not None and pool_n is None:
+            raise ValueError(
+                f"head_reduce={head_reduce} applies only to 'pool<N>' heads, "
+                f"got head={head!r}"
+            )
 
         self.img_size = img_size
         self.channels = channels

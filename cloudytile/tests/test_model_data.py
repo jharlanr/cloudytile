@@ -161,6 +161,19 @@ class TestBandHeadGrid:
         assert {c["head"] for c in R.BANDHEAD_GRID} == set(R.HEADS)
         assert {c["bands"] for c in R.BANDHEAD_GRID} == set(R.BANDHEAD_BANDS)
 
+    def test_bandhead_index_order_matches_the_slurm_comment(self):
+        # slurm/run_cv_bandhead.sh documents array index -> config as a 1:1 map
+        # with no lookup table, so the product order (bands outer, heads inner,
+        # both in declaration order) is load-bearing. Reordering HEADS or
+        # BANDHEAD_BANDS would silently re-point every array index.
+        R = self._grid()
+        names = [R.config_name(c) for c in R.BANDHEAD_GRID]
+        assert names[:4] == ["rgb_gap", "rgb_mixed", "rgb_spatial", "rgb_full"]
+        assert names[4] == "rgb+nir_gap"
+        assert names[8] == "rgb+swir16_gap"
+        assert names[12] == "rgb+swir22_gap"
+        assert names[15] == "rgb+swir22_full"
+
     def test_every_config_builds_with_expected_size(self):
         R = self._grid()
         expected = {"gap": 228_609, "mixed": 229_657,
@@ -189,6 +202,84 @@ class TestBandHeadGrid:
         assert (max(sizes) - min(sizes)) / min(sizes) < 0.01
 
 
+class TestSelectionRegimeIsReproducible:
+    """
+    run_cv_grid.py SELECTS a config; run_training.py has to BUILD it.
+
+    Nothing enforced that, and the gap opened twice: the grid chose AdamW while
+    run_training hardcoded Adam, and the grid's 'mixed'/'spatial' heads are
+    defined by head_reduce, which run_training had no flag for and did not pass
+    to the model. The second one is the dangerous shape -- head='pool4' is
+    valid without head_reduce, so it would have trained a 16x-wider head under
+    the winner's name rather than failing.
+    """
+
+    def _mods(self):
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "engine"))
+        import run_cv_grid as R
+        import run_training as T
+        return R, T
+
+    @pytest.mark.parametrize("head", ["gap", "mixed", "spatial", "full"])
+    def test_every_grid_head_survives_the_cli(self, head):
+        R, T = self._mods()
+        spec = R.HEADS[head]
+        argv = ["--labels_csv", "l", "--nc_dir", "d",
+                "--nc_channels", "red", "green", "blue", "nir",
+                "--channels", *[str(c) for c in R.CHANNEL_SETS["deep6"]],
+                "--fc_layers", *[str(f) for f in spec["fc_layers"]],
+                "--head", spec["head"], "--img_size", "512"]
+        if spec["head_reduce"] is not None:
+            argv += ["--head_reduce", str(spec["head_reduce"])]
+        args = T.build_parser().parse_args(argv)
+        args.channels = T.parse_list(args.channels)
+        args.fc_layers = T.parse_list(args.fc_layers)
+        args.nc_channels = T.parse_string_list(args.nc_channels)
+
+        # built exactly as run_training.train() builds it
+        cfg = vars(args)
+        from_cli = CloudyTileCNN(
+            img_size=(cfg["img_size"], cfg["img_size"]),
+            channels=cfg["channels"], fc_layers=cfg["fc_layers"],
+            in_channels=len(cfg["nc_channels"]), head=cfg["head"],
+            head_reduce=cfg.get("head_reduce"))
+        from_grid = CloudyTileCNN(
+            img_size=(512, 512), channels=R.CHANNEL_SETS["deep6"],
+            in_channels=4, head=spec["head"],
+            head_reduce=spec["head_reduce"], fc_layers=spec["fc_layers"])
+
+        assert from_cli.n_parameters() == from_grid.n_parameters()
+        assert [tuple(v.shape) for v in from_cli.state_dict().values()] == \
+               [tuple(v.shape) for v in from_grid.state_dict().values()]
+
+    def test_optimizer_and_schedule_cover_the_grid(self):
+        R, T = self._mods()
+        p = T.build_parser()
+        opts = {a.option_strings[0]: a for a in p._actions}
+        assert set(R.OPTIMIZERS) <= set(opts["--optimizer"].choices)
+        assert "cosine" in opts["--lr_schedule"].choices
+
+    @pytest.mark.parametrize("spelling", [
+        ["--channels", "16", "32", "64"],       # nargs, as SLURM scripts write it
+        ["--channels", "16 32 64"],             # one shell word
+        ["--channels", "[16,32,64]"],           # a wandb sweep
+    ])
+    def test_list_flags_accept_every_spelling(self, spelling):
+        _, T = self._mods()
+        args = T.build_parser().parse_args(
+            ["--labels_csv", "l", "--nc_dir", "d"] + spelling)
+        assert T.parse_list(args.channels) == [16, 32, 64]
+
+    def test_head_reduce_without_pool_head_is_rejected(self):
+        # silently ignoring it is how "spatial" becomes a different model
+        with pytest.raises(ValueError):
+            CloudyTileCNN(head="gap", head_reduce=2)
+        with pytest.raises(ValueError):
+            CloudyTileCNN(head="flatten", head_reduce=2)
+
+
 class TestRunOneSmoke:
     """
     Actually execute one (config, fold) end to end.
@@ -207,7 +298,7 @@ class TestRunOneSmoke:
         a = dict(seed=0, head="gap", head_reduce=None, fc_layers=[8],
                  wandb_project="smoke", img_size=64, epochs=1, batch_size=4,
                  weight_decay=1e-4, lr_schedule="cosine", no_augment=True,
-                 nc_dir=nc_dir, band_stats=STATS, num_workers=0,
+                 nc_dir=nc_dir, band_stats=STATS, num_workers=0, folds=5,
                  threshold_objective="f1", target_precision=0.9)
         a.update(over)
         return argparse.Namespace(**a)
@@ -286,6 +377,97 @@ class TestRunOneSmoke:
                            self._args(nc_dir, head="gap", fc_layers=[128]))
         assert result["head"] == "gap"
         assert result["head_spec"]["fc_layers"] == [128]
+
+
+class TestGridCLI:
+    """
+    Invoke run_cv_grid.py as a subprocess, the way SLURM does.
+
+    TestRunOneSmoke covers run_one; this covers everything around it that a
+    unit test cannot reach -- argument parsing, frozen-split loading, fold
+    generation, the result JSON, resume, and --summarize. Between them the
+    whole path a SLURM task walks is executed before it is queued.
+    """
+
+    def _fixture(self, tmp_path):
+        import json
+        n_lakes, n_per, size = 8, 4, 64
+        rng = np.random.default_rng(0)
+        nc = tmp_path / "tiles"
+        nc.mkdir()
+        rows = []
+        for li in range(n_lakes):
+            lake = f"CW2019_{1500 + li}"
+            for t in range(n_per):
+                label = (li + t) % 2
+                arr = rng.normal(5000 + 400 * label, 900,
+                                 (6, size, size)).astype(np.float32)
+                arr[:, :6, :] = np.nan
+                name = f"{lake}_t{t:03d}"
+                xr.Dataset({"imagery": (["channel", "y", "x"], arr)},
+                           coords={"channel": BANDS}).to_netcdf(nc / f"{name}.nc")
+                rows.append({"filename": f"{name}.jpg", "label": label})
+        pd.DataFrame(rows).to_csv(tmp_path / "labels.csv", index=False)
+
+        lakes = [f"CW2019_{1500 + i}" for i in range(n_lakes)]
+        split = tmp_path / "split"
+        split.mkdir()
+        for name, ids in (("train", lakes[:5]), ("val", lakes[5:6]),
+                          ("test", lakes[6:])):
+            (split / f"{name}_ids.json").write_text(json.dumps(ids))
+        (tmp_path / "band_stats.json").write_text(json.dumps(
+            {b: {"mean": 5000.0, "std": 1000.0} for b in BANDS}))
+        return size
+
+    def _run(self, tmp_path, *extra):
+        import subprocess
+        import sys
+        from pathlib import Path as _P
+        script = _P(__file__).resolve().parents[2] / "engine" / "run_cv_grid.py"
+        return subprocess.run(
+            [sys.executable, str(script),
+             "--labels_csv", str(tmp_path / "labels.csv"),
+             "--split_dir", str(tmp_path / "split"),
+             "--nc_dir", str(tmp_path / "tiles"),
+             "--band_stats", str(tmp_path / "band_stats.json"),
+             "--out_dir", str(tmp_path / "out"), "--no_wandb", *extra],
+            capture_output=True, text=True)
+
+    def test_slurm_task_runs_and_summarizes(self, tmp_path):
+        import json
+        size = self._fixture(tmp_path)
+        common = ("--grid", "bandhead", "--folds", "2", "--epochs", "1",
+                  "--img_size", str(size), "--batch_size", "8",
+                  "--num_workers", "0", "--lr_schedule", "cosine",
+                  "--no_augment", "--seed", "42")
+        r = self._run(tmp_path, "--config_index", "1", *common)  # rgb_mixed
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+
+        outs = sorted((tmp_path / "out").glob("*.json"))
+        assert [p.name for p in outs] == ["rgb_mixed_fold0.json",
+                                          "rgb_mixed_fold1.json"]
+        d = json.loads(outs[0].read_text())
+        assert d["head"] == "mixed"
+        assert d["head_spec"]["head_reduce"] == 8
+        assert d["config_name"] == "rgb_mixed"
+        assert d["epochs"] == 1 and d["lr_schedule"] == "cosine"
+        assert d["augment"] is False
+        assert d["elapsed_sec"] > 0
+
+        # resume: finished folds are skipped, not silently recomputed
+        r = self._run(tmp_path, "--config_index", "1", *common)
+        assert r.stdout.count("skip existing") == 2
+
+        r = self._run(tmp_path, "--summarize")
+        assert r.returncode == 0, r.stderr[-1000:]
+        assert "rgb_mixed" in r.stdout
+        assert (tmp_path / "out" / "summary.csv").exists()
+
+    def test_config_index_past_the_grid_is_rejected(self, tmp_path):
+        self._fixture(tmp_path)
+        r = self._run(tmp_path, "--grid", "bandhead", "--config_index", "16")
+        assert r.returncode != 0
+        assert "out of range" in r.stderr and "0..15" in r.stderr
 
 
 class TestNCDataset:

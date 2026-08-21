@@ -34,6 +34,7 @@ import itertools
 import json
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -187,7 +188,8 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             name=f"{config_name(cfg, args.head)}_fold{fold}",
             group=config_name(cfg, args.head),
             job_type="cv",
-            tags=[cfg["bands"], cfg["arch"], cfg["optimizer"], f"fold{fold}"],
+            tags=[cfg["bands"], cfg["arch"], cfg["optimizer"],
+                  f"head:{cfg.get('head', args.head)}", f"fold{fold}"],
             config={**cfg, "fold": fold, "img_size": args.img_size,
                     "epochs": args.epochs, "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay, "seed": args.seed,
@@ -219,6 +221,20 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                                       augment=not args.no_augment, **common)
         val_ds = CloudyTileDatasetNC(splits["val"], **common)
         test_ds = CloudyTileDatasetNC(splits["test"], **common)
+
+        # The dataset drops requested bands that a .nc file does not carry, so
+        # a typo or a re-extracted tile set would quietly train a config on
+        # fewer bands than its name claims -- and the band axis is the whole
+        # point of this sweep. in_channels below is taken from BAND_SETS, so a
+        # mismatch would also surface as a shape error mid-forward; fail here
+        # instead, where the message says which band went missing.
+        for name, ds in (("train", train_ds), ("val", val_ds), ("test", test_ds)):
+            if list(ds.channels) != list(channels):
+                raise ValueError(
+                    f"{name} split resolved to {ds.channels}, but config "
+                    f"{cfg['bands']!r} asks for {channels}. Missing: "
+                    f"{sorted(set(channels) - set(ds.channels))}"
+                )
 
         loaders = {
             "train": DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
@@ -256,7 +272,9 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                 optimizer, T_max=args.epochs)
 
         best_val, best_state, best_epoch = float("inf"), None, None
+        fold_start = time.time()
         for epoch in range(args.epochs):
+            epoch_start = time.time()
             train_loss = train_one_epoch(model, loaders["train"], optimizer,
                                          criterion, device)
             val_loss, val_metrics = evaluate(model, loaders["val"], criterion, device)
@@ -266,15 +284,33 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                 best_val, best_epoch = val_loss, epoch + 1
                 best_state = {k: v.detach().cpu().clone()
                               for k, v in model.state_dict().items()}
+            secs = time.time() - epoch_start
             print(f"  [{config_name(cfg, args.head)} fold {fold}] epoch {epoch+1}/{args.epochs} "
                   f"train {train_loss:.4f} val {val_loss:.4f} "
-                  f"acc {val_metrics['accuracy']:.3f}")
+                  f"acc {val_metrics['accuracy']:.3f} {secs:.1f}s")
+            # A task that will blow its walltime is knowable from the first
+            # epoch, not from the log 30 hours later. Project the whole task
+            # (remaining folds included) while there is still time to requeue.
+            if epoch == 0:
+                per_fold = secs * args.epochs / 3600
+                print(f"  [{config_name(cfg, args.head)} fold {fold}] "
+                      f"projected {per_fold:.1f} h/fold, "
+                      f"{per_fold * args.folds:.1f} h for all {args.folds} folds")
             sys.stdout.flush()
             if run is not None:
                 wandb.log({"epoch": epoch + 1, "train_loss": train_loss,
                            "val_loss": val_loss,
                            "lr": optimizer.param_groups[0]["lr"],
                            **{f"val_{k}": v for k, v in val_metrics.items()}})
+
+        # No finite val loss in any epoch means training diverged; say so,
+        # rather than failing inside load_state_dict(None) several lines later
+        # with an error that names neither the config nor the cause.
+        if best_state is None:
+            raise RuntimeError(
+                f"{config_name(cfg, args.head)} fold {fold}: no finite "
+                f"validation loss in {args.epochs} epochs — training diverged"
+            )
 
         # Score the checkpoint that would actually be shipped, at an operating
         # point chosen on this fold's validation lakes (never on its test lakes).
@@ -298,6 +334,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         "lr_schedule": args.lr_schedule,
         "best_epoch": best_epoch,
         "best_val_loss": best_val,
+        "elapsed_sec": round(time.time() - fold_start, 1),
         "threshold": threshold,
         "n_parameters": model.n_parameters(),
         "test_loss": test_loss,
@@ -434,6 +471,13 @@ def main():
     from cloudytile.splits import dev_labels, lake_group_kfold
 
     grid = GRIDS[args.grid]
+    # A SLURM --array wider than the grid would otherwise die on a bare
+    # IndexError in every surplus task, with nothing in the message naming the
+    # mismatch between the array range and the grid size.
+    if args.config_index >= len(grid):
+        p.error(f"--config_index {args.config_index} is out of range for grid "
+                f"'{args.grid}' ({len(grid)} configs, valid 0..{len(grid)-1}). "
+                f"Check the SLURM --array range.")
     configs = grid if args.config_index < 0 else [grid[args.config_index]]
     print(f"grid '{args.grid}': {len(grid)} configs; running {len(configs)} "
           f"x {args.folds} folds at {args.img_size}px")

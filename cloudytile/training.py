@@ -33,11 +33,14 @@ def compute_metrics(
         "f1": f1_score(all_labels, all_preds, zero_division=0),
     }
 
-    # AUC requires both classes to be present
+    # AUC is undefined with one class present. NaN, not 0.0: configs are ranked
+    # by mean AUC across folds, and a 0.0 would silently drag a config's mean
+    # down by 1/k as though it had scored perfectly badly, rather than being
+    # visibly absent from the average.
     if len(set(all_labels)) > 1:
         metrics["auc"] = roc_auc_score(all_labels, all_probs)
     else:
-        metrics["auc"] = 0.0
+        metrics["auc"] = float("nan")
 
     return metrics
 

@@ -15,33 +15,50 @@ import tempfile
 from pathlib import Path
 
 
+def _tokens(value):
+    """
+    Normalize the three shapes a list argument arrives in to one token string.
+
+    These flags are written three different ways and all three have to work:
+      --channels 16 32 64      argparse nargs -> ['16','32','64']  (SLURM
+                               scripts, and how run_cv_grid.py spells it)
+      --channels '16 32 64'    one shell word -> '16 32 64'
+      channels: '[16,32,64]'   a wandb sweep  -> '[16,32,64]'
+    Until now only the last two parsed; the first raised "unrecognized
+    arguments: 32 64", which is exactly how run_final_model.sh was written.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(v) for v in value)
+    return str(value)
+
+
 def parse_list(value):
-    """Parse a list from string (handles both '[1,2,3]' and '1 2 3' formats)."""
-    if isinstance(value, list):
-        return value
-    # Try to parse as Python literal (handles [1, 2, 3] format from wandb)
+    """Ints from '[1,2,3]', '1 2 3', ['1','2','3'], or [1,2,3]."""
+    value = _tokens(value)
+    if value is None:
+        return None
     try:
         parsed = ast.literal_eval(value)
         if isinstance(parsed, list):
-            return parsed
+            return [int(x) for x in parsed]
     except (ValueError, SyntaxError):
         pass
-    # Fall back to space-separated integers
     return [int(x) for x in value.split()]
 
 
 def parse_string_list(value):
-    """Parse a list of strings (handles both "['a','b']" and "a b" formats)."""
-    if isinstance(value, list):
-        return value
-    # Try to parse as Python literal (handles ['a', 'b'] format from wandb)
+    """Strings from "['a','b']", 'a b', or ['a','b']."""
+    value = _tokens(value)
+    if value is None:
+        return None
     try:
         parsed = ast.literal_eval(value)
         if isinstance(parsed, list):
             return [str(x) for x in parsed]
     except (ValueError, SyntaxError):
         pass
-    # Fall back to space-separated strings
     return value.split()
 
 import random
@@ -219,6 +236,7 @@ def train(config: dict):
             fc_layers=config.get("fc_layers", [128]),
             in_channels=in_channels,
             head=config.get("head", "gap"),
+            head_reduce=config.get("head_reduce"),
             batch_norm=not config.get("no_batchnorm", False),
             dropout=config.get("dropout", 0.3),
         ).to(device)
@@ -461,7 +479,16 @@ def _log_misclassified(model, dataset, device):
     print(f"\n  Logged {len(misclassified)} misclassified samples to wandb")
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """
+    The CLI, separated from main() so tests can assert the contract that binds
+    this script to run_cv_grid.py: every config the grid can SELECT, this
+    script must be able to BUILD. That contract has now been broken twice --
+    once by --optimizer (the grid chose adamw while this script hardcoded Adam)
+    and once by --head_reduce (the grid's 'mixed'/'spatial' heads were
+    unbuildable here) -- both times silently, because nothing compared the two
+    surfaces. test_selection_regime_is_reproducible does now.
+    """
     parser = argparse.ArgumentParser(description="Train CloudyTileCNN")
     parser.add_argument("--labels_csv", type=str, required=True,
                         help="Path to labels CSV")
@@ -476,9 +503,9 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--img_size", type=int, default=512)
-    parser.add_argument("--channels", type=parse_list, default=[16, 32, 64],
+    parser.add_argument("--channels", type=str, nargs="+", default=[16, 32, 64],
                         help="Conv channel sizes (e.g., '16 32 64' or '[16,32,64]')")
-    parser.add_argument("--fc_layers", type=parse_list, default=[128],
+    parser.add_argument("--fc_layers", type=str, nargs="+", default=[128],
                         help="FC layer sizes (e.g., '128' or '[128,64]')")
     parser.add_argument("--optimizer", type=str, default="adam",
                         choices=["adam", "adamw"],
@@ -506,8 +533,7 @@ def main():
     parser.add_argument("--wandb_name", type=str, default=None)
     parser.add_argument("--no_wandb", action="store_true",
                         help="Disable wandb logging")
-    parser.add_argument("--nc_channels", type=parse_string_list,
-                        default=None,
+    parser.add_argument("--nc_channels", type=str, nargs="+", default=None,
                         help="Channels to load from NC files (default: all six "
                              "SDR bands red green blue nir swir16 swir22)")
     parser.add_argument("--in_channels", type=int, default=None,
@@ -515,8 +541,18 @@ def main():
     parser.add_argument("--band_stats", type=str, default=None,
                         help="Path to JSON file with per-band normalization statistics")
     parser.add_argument("--head", type=str, default="gap",
-                        choices=["gap", "flatten"],
-                        help="Classifier head; 'flatten' only for legacy checkpoints")
+                        help="Classifier head: 'gap', 'pool<N>' (NxN grid per "
+                             "channel), or 'flatten' (legacy checkpoints only). "
+                             "Not a fixed choice list: the CV grid selects over "
+                             "pool<N> heads, and this script has to be able to "
+                             "train whichever one wins.")
+    parser.add_argument("--head_reduce", type=int, default=None,
+                        help="With pool<N>: collapse the conv stack's channels "
+                             "to this many with a 1x1 conv BEFORE pooling. This "
+                             "is not a tweak — it defines the head. The grid's "
+                             "'mixed' head is pool4 + head_reduce 8 and "
+                             "'spatial' is pool8 + head_reduce 2; omitting it "
+                             "builds a far larger model under the same name.")
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--no_batchnorm", action="store_true")
     parser.add_argument("--no_augment", action="store_true",
@@ -533,7 +569,17 @@ def main():
                              "precision floor — use when false positives are "
                              "costlier than false negatives")
     parser.add_argument("--target_precision", type=float, default=0.95)
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
+    # nargs="+" gives a list of raw tokens; normalize to typed lists here so
+    # every spelling in _tokens() converges on the same value.
+    args.channels = parse_list(args.channels)
+    args.fc_layers = parse_list(args.fc_layers)
+    args.nc_channels = parse_string_list(args.nc_channels)
     args.augment = not args.no_augment
     args.tune_threshold = not args.no_tune_threshold
 
@@ -549,8 +595,13 @@ def main():
             name=args.wandb_name,
             config=config,
         )
-        # Allow sweep to override config
+        # Allow sweep to override config. A sweep supplies these as strings
+        # ('[16,32,64]'), so re-normalize -- otherwise a swept architecture
+        # reaches the model as text.
         config = dict(wandb.config)
+        config["channels"] = parse_list(config.get("channels"))
+        config["fc_layers"] = parse_list(config.get("fc_layers"))
+        config["nc_channels"] = parse_string_list(config.get("nc_channels"))
         # Ensure required paths are set
         config["labels_csv"] = args.labels_csv
         config["image_dir"] = args.image_dir
