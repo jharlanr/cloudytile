@@ -133,7 +133,8 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                     "epochs": args.epochs, "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay, "seed": args.seed,
                     "lr_schedule": args.lr_schedule,
-                    "head": args.head, "fc_layers": args.fc_layers,
+                    "head": args.head, "head_reduce": args.head_reduce,
+                    "fc_layers": args.fc_layers,
                     "augment": not args.no_augment,
                     "n_bands": len(BAND_SETS[cfg["bands"]])},
             reinit=True,
@@ -174,6 +175,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             channels=CHANNEL_SETS[cfg["arch"]],
             in_channels=len(channels),
             head=args.head,
+            head_reduce=args.head_reduce,
             fc_layers=args.fc_layers,
         ).to(device)
 
@@ -230,6 +232,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         "config": cfg,
         "config_name": config_name(cfg, args.head),
         "head": args.head,
+        "head_reduce": args.head_reduce,
         "fc_layers": args.fc_layers,
         "augment": not args.no_augment,
         "fold": fold,
@@ -321,6 +324,12 @@ def main():
                         "coarse spatial structure reaches the classifier), or "
                         "'flatten' (legacy, resolution-dependent). Pair "
                         "pool<N> with a narrow --fc_layers.")
+    p.add_argument("--head_reduce", type=int, default=None,
+                   help="With pool<N>: collapse the conv stack's channels to "
+                        "this many with a 1x1 conv BEFORE pooling. 1 gives a "
+                        "single NxN usability map (256 values at N=16) instead "
+                        "of N*N per channel (16,384), which is what keeps the "
+                        "flattened vector — and the dense layer — small.")
     p.add_argument("--fc_layers", type=int, nargs="+", default=[128],
                    help="Hidden widths of the classifier MLP (default 128)")
     p.add_argument("--no_augment", action="store_true",

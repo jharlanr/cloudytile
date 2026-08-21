@@ -43,6 +43,7 @@ class CloudyTileCNN(nn.Module):
         fc_layers: list[int] = None,
         in_channels: int = 6,
         head: str = "gap",
+        head_reduce: int = None,
         batch_norm: bool = True,
         dropout: float = 0.3,
     ):
@@ -96,13 +97,33 @@ class CloudyTileCNN(nn.Module):
             prev_channels = out_channels
 
         self.features = nn.Sequential(*conv_layers)
+        self.reduce = None
 
         if head == "gap":
             self.pool = nn.AdaptiveAvgPool2d(1)
             flat_size = channels[-1]
         elif pool_n is not None:
+            # head_reduce collapses the channel axis with a 1x1 conv BEFORE
+            # pooling. Without it a 16x16 grid over 64 channels flattens to
+            # 16,384 values and the first dense layer dominates the model;
+            # reducing to a handful of channels first keeps the spatial
+            # information while making the flatten cheap. head_reduce=1 yields a
+            # single 16x16 "usability map" that the MLP then reads -- the
+            # segmentation-style formulation: score every region, then learn how
+            # to aggregate, rather than averaging uniformly as GAP does.
+            if head_reduce is not None:
+                if head_reduce < 1:
+                    raise ValueError(f"head_reduce must be >= 1, got {head_reduce}")
+                reduce_layers = [nn.Conv2d(channels[-1], head_reduce, kernel_size=1)]
+                if batch_norm:
+                    reduce_layers.append(nn.BatchNorm2d(head_reduce))
+                reduce_layers.append(nn.ReLU())
+                self.reduce = nn.Sequential(*reduce_layers)
+                pooled_channels = head_reduce
+            else:
+                pooled_channels = channels[-1]
             self.pool = nn.AdaptiveAvgPool2d(pool_n)
-            flat_size = channels[-1] * pool_n * pool_n
+            flat_size = pooled_channels * pool_n * pool_n
         else:
             self.pool = None
             # after len(channels) MaxPool2d(2), spatial dims shrink by 2^len
@@ -126,6 +147,8 @@ class CloudyTileCNN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
+        if self.reduce is not None:
+            x = self.reduce(x)
         if self.pool is not None:
             x = self.pool(x)
         x = self.classifier(x)

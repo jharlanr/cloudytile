@@ -57,15 +57,19 @@ CONFIGS=(1 9 17 25 33 41 49 57)
 #   tasks  0-7  -> gap     : AdaptiveAvgPool2d(1), 1 number per channel.
 #                            Fully translation-invariant; discards WHERE.
 #   tasks 8-15  -> pool16  : AdaptiveAvgPool2d(16), a 16x16 grid per channel,
-#                            flattened into an 8-wide hidden layer. Coarse
+#                            reduced to ONE channel by a 1x1 conv first, so the
+#                            flatten is 1x16x16 = 256 values, not 64x16x16 =
+#                            16,384. That makes this head CHEAPER than gap
+#                            (26,084 params vs 32,401). Coarse
 #                            spatial layout survives to the classifier, which
 #                            plausibly matters here: half a tile under cloud and
 #                            a uniformly hazy tile can average to the same thing
 #                            under GAP but are different calls.
 # Both are resolution-independent (adaptive pooling fixes the output grid), so
 # neither reintroduces the flatten head's dependence on image area.
-# fc width is tied to the head: 64x16x16 = 16,384 inputs, so 8 hidden units
-# costs 155k params total while 128 would cost 2.1M.
+# The 1x1 reduction is what makes the spatial head affordable: without it the
+# same 16x16 grid over 64 channels flattens to 16,384 values and the dense layer
+# alone is 131,072 weights.
 N_BANDS=${#CONFIGS[@]}
 if [ "$SLURM_ARRAY_TASK_ID" -ge $((2 * N_BANDS)) ]; then
     echo "ERROR: array task $SLURM_ARRAY_TASK_ID exceeds $((2 * N_BANDS)) configs; fix --array." >&2
@@ -73,9 +77,9 @@ if [ "$SLURM_ARRAY_TASK_ID" -ge $((2 * N_BANDS)) ]; then
 fi
 CONFIG_INDEX="${CONFIGS[$((SLURM_ARRAY_TASK_ID % N_BANDS))]}"
 if [ "$SLURM_ARRAY_TASK_ID" -lt "$N_BANDS" ]; then
-    HEAD=gap;    FC_LAYERS=128
+    HEAD=gap;    FC_LAYERS=128; HEAD_REDUCE=""
 else
-    HEAD=pool16; FC_LAYERS=8
+    HEAD=pool16; FC_LAYERS=8; HEAD_REDUCE="--head_reduce 1"
 fi
 echo "array task $SLURM_ARRAY_TASK_ID -> GRID config index $CONFIG_INDEX, head $HEAD, fc $FC_LAYERS"
 
@@ -136,6 +140,7 @@ python3 "$REPO_DIR/engine/run_cv_grid.py" \
     --img_size 512 \
     --head "$HEAD" \
     --fc_layers "$FC_LAYERS" \
+    $HEAD_REDUCE \
     --no_augment \
     --lr_schedule cosine \
     --weight_decay 1e-4 \

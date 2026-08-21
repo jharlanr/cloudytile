@@ -104,6 +104,33 @@ class TestModel:
         gap = CloudyTileCNN(in_channels=4, head="gap")
         assert p1.n_parameters() == gap.n_parameters()
 
+    def test_head_reduce_collapses_channels_before_flatten(self):
+        # the difference between "16x16 over 64 channels" (16,384 values) and
+        # "16x16 over 1 channel" (256 values) is the whole parameter story
+        full = CloudyTileCNN(in_channels=4, head="pool16", fc_layers=[8])
+        red = CloudyTileCNN(in_channels=4, head="pool16", head_reduce=1,
+                            fc_layers=[8])
+        assert full.state_dict()["classifier.2.weight"].shape == (8, 16384)
+        assert red.state_dict()["classifier.2.weight"].shape == (8, 256)
+        # and the reduced head is cheaper than GAP, whose 64->128 layer alone
+        # is larger than this entire head
+        gap = CloudyTileCNN(in_channels=4, head="gap")
+        assert red.n_parameters() < gap.n_parameters() < full.n_parameters()
+
+    def test_head_reduce_still_resolution_independent(self):
+        a = CloudyTileCNN(img_size=(256, 256), in_channels=4, head="pool16",
+                          head_reduce=1, fc_layers=[8])
+        b = CloudyTileCNN(img_size=(512, 512), in_channels=4, head="pool16",
+                          head_reduce=1, fc_layers=[8])
+        assert a.n_parameters() == b.n_parameters()
+        b.eval()
+        for s in (128, 512):
+            assert b(torch.zeros(2, 4, s, s)).shape == (2,)
+
+    def test_head_reduce_rejects_nonpositive(self):
+        with pytest.raises(ValueError):
+            CloudyTileCNN(head="pool16", head_reduce=0)
+
     def test_rejects_malformed_pool_head(self):
         for bad in ("poolx", "pool", "pool0", "pool-4"):
             with pytest.raises(ValueError):
