@@ -335,266 +335,198 @@ inside that pool. The 80 test lakes are read exactly once, by the final model.
 
 <h2>5. The network</h2>
 <p>
-<code>CloudyTileCNN</code> (<code>cloudytile/model.py</code>) is a deliberately small CNN: three
-conv blocks &mdash; each <em>conv 3&times;3 &rarr; BatchNorm &rarr; ReLU &rarr; maxpool /2</em>
-&mdash; then a global-average-pooling head, dropout 0.3, and a single logit
-(sigmoid &rarr; probability of "useful"). Input is a stack of one to six normalized bands.
-Training augments with flips and 90&deg; rotations, which are exact symmetries here: a satellite
-tile has no canonical orientation.
+<code>CloudyTileCNN</code> (<code>cloudytile/model.py</code>) is a small CNN in two parts: a
+<strong>convolutional stack</strong> that turns the tile into a compact feature block, and a
+<strong>head</strong> that turns that block into one number. The stack is six blocks of
+<em>conv&nbsp;3&times;3 &rarr; BatchNorm &rarr; ReLU &rarr; maxpool&nbsp;/2</em>, with channel
+widths [16,&thinsp;32,&thinsp;64,&thinsp;64,&thinsp;96,&thinsp;128]. Input is one to six
+normalized bands at 512&times;512; output is a single logit.
 </p>
 <figure>
-<svg viewBox="0 0 1100 250" role="img" aria-label="Tensor shapes through CloudyTileCNN with four input bands at 256 pixels. The input shrinks through three conv-BatchNorm-pool blocks to 64 by 32 by 32, is reduced by global average pooling to 64 values, then two linear layers map to 128 and to a single logit. Layer parameter counts are 624, 4704, 18624, zero for the pooling, 8320 and 129, totalling 32,401.">
+<svg viewBox="0 0 916 310" role="img" aria-label="The convolutional stack in six blocks. A 4 by 512 by 512 input passes through six conv-BatchNorm-ReLU-maxpool blocks with channel widths 16, 32, 64, 64, 96 and 128, halving the spatial grid each time: 256, 128, 64, 32, 16 and finally 8 by 8. The receptive field of one output unit grows from 4 pixels to 190 pixels.">
   <defs>
-    <marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
     </marker>
   </defs>
-  <g fill="none" stroke="currentColor" stroke-width="1.3">
-    <rect x="20"  y="50" width="76" height="140" rx="6"/>
-    <rect x="205" y="68" width="76" height="104" rx="6"/>
-    <rect x="390" y="82" width="76" height="76"  rx="6"/>
-    <rect x="575" y="94" width="76" height="52"  rx="6"/>
-  </g>
-  <rect x="745" y="98" width="16" height="44" rx="3" fill="none" stroke="var(--good)" stroke-width="1.6"/>
-  <rect x="855" y="97" width="56" height="46" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
-  <circle cx="1010" cy="120" r="20" fill="none" stroke="currentColor" stroke-width="1.3"/>
-  <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr5)">
-    <line x1="96"  y1="120" x2="201" y2="120"/>
-    <line x1="281" y1="120" x2="386" y2="120"/>
-    <line x1="466" y1="120" x2="571" y2="120"/>
-    <line x1="651" y1="120" x2="741" y2="120"/>
-    <line x1="761" y1="120" x2="851" y2="120"/>
-    <line x1="911" y1="120" x2="986" y2="120"/>
-  </g>
-  <g font-size="10.5" fill="currentColor" opacity="0.8" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">
-    <text x="148" y="106">conv+BN+pool</text>
-    <text x="333" y="106">conv+BN+pool</text>
-    <text x="518" y="106">conv+BN+pool</text>
-    <text x="696" y="106">global avg pool</text>
-    <text x="806" y="106">Linear</text>
-    <text x="948" y="106">Linear</text>
-  </g>
-  <g font-size="11" fill="currentColor" opacity="0.75" text-anchor="middle">
-    <text x="148" y="142">624</text>
-    <text x="333" y="142">4,704</text>
-    <text x="518" y="142">18,624</text>
-    <text x="806" y="142">8,320</text>
-    <text x="948" y="142">129</text>
-  </g>
-  <text x="696" y="142" font-size="11" fill="var(--good)" text-anchor="middle" font-weight="600">0 params</text>
-  <g font-size="12" fill="currentColor" text-anchor="middle">
-    <text x="58"  y="212">4&times;256&times;256</text>
-    <text x="243" y="212">16&times;128&times;128</text>
-    <text x="428" y="212">32&times;64&times;64</text>
-    <text x="613" y="212">64&times;32&times;32</text>
-    <text x="753" y="212">64</text>
-    <text x="883" y="125">128</text>
-    <text x="1010" y="125">1</text>
-  </g>
-  <text x="58" y="38" font-size="12" fill="currentColor" text-anchor="middle">input bands</text>
+  <text x="52" y="26" font-size="12" fill="currentColor">box height &#8733; spatial grid &#183; box width &#8733; channel count &#183; labels give C&#215;H&#215;W</text>
+  <rect x="52" y="114" width="10" height="108" fill="var(--accent)" opacity="0.5"/><rect x="52" y="114" width="10" height="108" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="57" y="240" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">4&#215;512&#215;512</text>
+  <text x="57" y="104" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">input</text>
+  <text x="57" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">1px</text>
+  <rect x="174" y="120" width="20" height="96" fill="currentColor" opacity="0.19"/><rect x="174" y="120" width="20" height="96" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="184" y="234" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">16&#215;256&#215;256</text>
+  <text x="184" y="110" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">block 1</text>
+  <text x="184" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">4px</text>
+  <line x1="68" y1="168" x2="168" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrn)"/>
+  <text x="118" y="160" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">conv3&#215;3</text>
+  <text x="118" y="184" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">BN&#183;ReLU&#183;pool</text>
+  <rect x="296" y="126" width="25" height="84" fill="currentColor" opacity="0.24"/><rect x="296" y="126" width="25" height="84" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="308" y="228" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">32&#215;128&#215;128</text>
+  <text x="308" y="116" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">block 2</text>
+  <text x="308" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">10px</text>
+  <line x1="200" y1="168" x2="290" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrn)"/>
+  <text x="245" y="160" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">conv3&#215;3</text>
+  <text x="245" y="184" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">BN&#183;ReLU&#183;pool</text>
+  <rect x="418" y="132" width="30" height="72" fill="currentColor" opacity="0.29"/><rect x="418" y="132" width="30" height="72" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="433" y="222" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">64&#215;64&#215;64</text>
+  <text x="433" y="122" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">block 3</text>
+  <text x="433" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">22px</text>
+  <line x1="327" y1="168" x2="412" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrn)"/>
+  <text x="370" y="160" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">conv3&#215;3</text>
+  <text x="370" y="184" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">BN&#183;ReLU&#183;pool</text>
+  <rect x="540" y="138" width="30" height="60" fill="currentColor" opacity="0.34"/><rect x="540" y="138" width="30" height="60" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="555" y="216" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">64&#215;32&#215;32</text>
+  <text x="555" y="128" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">block 4</text>
+  <text x="555" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">46px</text>
+  <line x1="454" y1="168" x2="534" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrn)"/>
+  <text x="494" y="160" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">conv3&#215;3</text>
+  <text x="494" y="184" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">BN&#183;ReLU&#183;pool</text>
+  <rect x="662" y="144" width="33" height="48" fill="currentColor" opacity="0.39"/><rect x="662" y="144" width="33" height="48" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="678" y="210" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">96&#215;16&#215;16</text>
+  <text x="678" y="134" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">block 5</text>
+  <text x="678" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">94px</text>
+  <line x1="576" y1="168" x2="656" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrn)"/>
+  <text x="616" y="160" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">conv3&#215;3</text>
+  <text x="616" y="184" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">BN&#183;ReLU&#183;pool</text>
+  <rect x="784" y="150" width="35" height="36" fill="currentColor" opacity="0.44"/><rect x="784" y="150" width="35" height="36" fill="none" stroke="currentColor" stroke-width="1.1"/>
+  <text x="802" y="204" font-size="10.5" fill="currentColor" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">128&#215;8&#215;8</text>
+  <text x="802" y="140" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">block 6</text>
+  <text x="802" y="290" font-size="10.5" fill="var(--good)" text-anchor="middle">190px</text>
+  <line x1="701" y1="168" x2="778" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrn)"/>
+  <text x="740" y="160" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">conv3&#215;3</text>
+  <text x="740" y="184" font-size="9" fill="currentColor" opacity="0.6" text-anchor="middle">BN&#183;ReLU&#183;pool</text>
+  <text x="44" y="290" font-size="10.5" fill="var(--good)" text-anchor="end" font-weight="600">receptive field</text>
 </svg>
-<figcaption>Tensor shapes and per-stage parameter counts for the <code>rgb+nir</code> configuration
-at 256&thinsp;px &mdash; 32,401 parameters in total, which is what
-<code>run_cv_grid.py</code> reports for that config. Global average pooling collapses each of the
-64 channels to its mean, so the classifier head sees 64 numbers no matter how large the input
-image was.</figcaption>
+<figcaption>Each block quarters the spatial area and grows the channel count, so the tensor gets
+shorter and thicker as it moves right. The bottom row tracks the <strong>receptive field</strong>
+&mdash; how much of the original tile a single unit at that depth actually sees. It reaches
+<strong>190&thinsp;px, about 37% of the tile</strong>, at block 6.</figcaption>
 </figure>
+<h3>Why six blocks: receptive field</h3>
 <p>
-That last point is the reason for the GAP head. A head that flattens the final feature block
-instead would size its first dense layer to the <em>image area</em>: at 256&thinsp;px that is a
-65,536-element vector, and at 512&thinsp;px a 262,144-element one, giving dense layers of 8.4M
-and 33.5M weights respectively. The parameter count would then be set by a preprocessing choice
-rather than by any decision about model capacity, and it would change out from under you the
-moment the input resolution changed. Averaging instead makes the head 8,320 parameters at every
-resolution, which is why the config grid can be run at 256&thinsp;px and the winner re-run at
-512&thinsp;px without touching the architecture.
+The number that drives the depth is the <strong>receptive field</strong> &mdash; how much of the
+original tile a single unit at the top of the stack is computed from. It grows with depth because
+each pooling step doubles the stride at which later convolutions operate:
 </p>
-<h3>Parameter counts across the grid</h3>
 <table>
-<tr><th>configuration</th><th>conv channels</th><th>parameters</th></tr>
-<tr><td><code>rgb</code> small</td><td>[16,&thinsp;32,&thinsp;64]</td><td class="num">32,257</td></tr>
-<tr><td><code>rgb+nir</code> small</td><td>[16,&thinsp;32,&thinsp;64]</td><td class="num">32,401</td></tr>
-<tr><td><code>all6</code> small</td><td>[16,&thinsp;32,&thinsp;64]</td><td class="num">32,689</td></tr>
-<tr><td><code>rgb</code> wide</td><td>[32,&thinsp;64,&thinsp;128]</td><td class="num">110,337</td></tr>
+<tr><th>blocks</th><th>grid</th><th>receptive field</th><th>share of a 512&thinsp;px tile</th></tr>
+<tr><td>3</td><td>64&times;64</td><td class="num">22 px</td><td class="num">4.3%</td></tr>
+<tr><td>4</td><td>32&times;32</td><td class="num">46 px</td><td class="num">9.0%</td></tr>
+<tr><td>5</td><td>16&times;16</td><td class="num">94 px</td><td class="num">18.4%</td></tr>
+<tr><td><strong>6</strong></td><td>8&times;8</td><td class="num"><strong>190 px</strong></td><td class="num"><strong>37.1%</strong></td></tr>
 </table>
 <p>
-Adding input bands costs almost nothing &mdash; three extra channels is 432 weights in the first
-conv &mdash; because band count only touches one layer. Widening the conv stack is what actually
-changes capacity, and it is a 3.4&times; jump. Both are small enough that the whole grid fits
-comfortably on one GPU.
+A three-block stack computes every feature from a 22&thinsp;px window &mdash; 4% of the tile.
+Pooling then averages those local features globally, but no individual feature ever sees
+large-scale cloud structure, which is precisely what "is this tile readable" depends on. Six
+blocks puts each feature at 190&thinsp;px, roughly 1.9&thinsp;km on the ground.
 </p>
+<div class="callout">
+<strong>Depth is cheap; width at high resolution is not.</strong> Blocks 4&ndash;6 run on 32&times;32
+and smaller grids, so they add capacity almost for free: the six-block stack costs
+<strong>1.3&times;</strong> the three-block one in multiply-accumulates. Doubling the <em>first</em>
+block's channels instead &mdash; [32,&thinsp;64,&thinsp;128,&hellip;] &mdash; costs
+<strong>4.6&times;</strong>, because that convolution runs at 256&times;256. Grow channels late.
+</div>
 
-<h3>Two classifier heads</h3>
+<h3>Three heads, one output size</h3>
 <p>
-The conv stack turns a 512&times;512 tile into <strong>64 channels of 64&times;64</strong>. The
-head's job is to get from that block to one number. How much of the block it keeps is a real
-modelling choice, and the two options differ only in one argument: how finely they pool.
+The stack hands the head a <strong>128&times;8&times;8</strong> block. Every head is the same
+operation with different settings &mdash; reduce to <em>K</em> channels with a 1&times;1
+convolution, then average-pool to an <em>N</em>&times;<em>N</em> grid &mdash; and the flattened
+vector is <em>K</em>&thinsp;&times;&thinsp;<em>N</em>&sup2; long. Choosing K and N so that product
+stays fixed at 128 makes the three heads directly comparable:
 </p>
 <figure>
-<svg viewBox="0 0 1020 530" role="img" aria-label="The conv stack outputs 64 channels of 64 by 64. Three heads reduce it differently. GAP averages each channel to one value, giving 64 numbers. Pooling to 16 by 16 while keeping all 64 channels gives 16,384 numbers and a 131,072-weight dense layer. Reducing to a single channel with a 1x1 convolution first, then pooling to 16 by 16, gives 256 numbers and a 2,048-weight dense layer.">
+<svg viewBox="0 0 880 590" role="img" aria-label="Three heads applied to the same 128 by 8 by 8 conv output. gap averages each channel to one value giving 128 by 1 by 1. mixed reduces to 8 channels and pools to 4 by 4, giving 8 by 4 by 4. spatial reduces to 2 channels at the full 8 by 8 grid. All three produce exactly 128 values, which feed the same 8-unit hidden layer and a single logit.">
   <defs>
-    <marker id="arrk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
-    </marker>
+    <marker id="arrq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
   </defs>
-
-  <text x="128" y="176" font-size="12.5" fill="currentColor" text-anchor="middle">conv stack output</text>
-  <rect x="96" y="218" width="80" height="80" fill="currentColor" opacity="0.16"/>
-  <rect x="96" y="218" width="80" height="80" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <rect x="83" y="231" width="80" height="80" fill="currentColor" opacity="0.16"/>
-  <rect x="83" y="231" width="80" height="80" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <rect x="70" y="244" width="80" height="80" fill="currentColor" opacity="0.16"/>
-  <rect x="70" y="244" width="80" height="80" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <text x="152" y="206" font-size="17" fill="currentColor" opacity="0.55" text-anchor="middle">&#8943;</text>
-  <rect x="163" y="177" width="80" height="80" fill="currentColor" opacity="0.16"/>
-  <rect x="163" y="177" width="80" height="80" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <path d="M70,338 Q70,345 77,345 L149.5,345 Q156.5,345 156.5,352 Q156.5,345 163.5,345 L236,345 Q243,345 243,338" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="156" y="368" font-size="12" fill="currentColor" text-anchor="middle">64 channels, each 64 &times; 64</text>
-
-  <g fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrk)">
-    <path d="M250,270 C 300,270 300,110 348,110"/>
-    <path d="M250,285 C 300,285 300,285 348,285"/>
-    <path d="M250,300 C 300,300 300,432 348,432"/>
-  </g>
-
-  <text x="299" y="96" font-size="10.5" fill="var(--good)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">AvgPool(1)</text>
-  <rect x="370" y="102" width="16" height="16" fill="var(--good)" opacity="0.85"/>
-  <rect x="370" y="102" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <rect x="363" y="109" width="16" height="16" fill="var(--good)" opacity="0.85"/>
-  <rect x="363" y="109" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <rect x="356" y="116" width="16" height="16" fill="var(--good)" opacity="0.85"/>
-  <rect x="356" y="116" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <text x="386" y="105" font-size="15" fill="currentColor" opacity="0.55" text-anchor="middle">&#8943;</text>
-  <rect x="394" y="95" width="16" height="16" fill="var(--good)" opacity="0.85"/>
-  <rect x="394" y="95" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <path d="M356,140 Q356,146 362,146 L377.0,146 Q383.0,146 383.0,152 Q383.0,146 389.0,146 L404,146 Q410,146 410,140" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="383" y="168" font-size="11.5" fill="currentColor" text-anchor="middle">64 &times; 1 &times; 1</text>
-
-  <text x="299" y="272" font-size="10.5" fill="var(--danger)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">AvgPool(16)</text>
-  <rect x="378" y="264" width="62" height="62" fill="var(--danger)" opacity="0.55"/>
-  <line x1="393.5" y1="264" x2="393.5" y2="326" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="378" y1="279.5" x2="440" y2="279.5" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="409.0" y1="264" x2="409.0" y2="326" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="378" y1="295.0" x2="440" y2="295.0" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="424.5" y1="264" x2="424.5" y2="326" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="378" y1="310.5" x2="440" y2="310.5" stroke="var(--bg)" stroke-width="0.9"/>
-  <rect x="378" y="264" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <rect x="367" y="275" width="62" height="62" fill="var(--danger)" opacity="0.55"/>
-  <line x1="382.5" y1="275" x2="382.5" y2="337" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="367" y1="290.5" x2="429" y2="290.5" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="398.0" y1="275" x2="398.0" y2="337" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="367" y1="306.0" x2="429" y2="306.0" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="413.5" y1="275" x2="413.5" y2="337" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="367" y1="321.5" x2="429" y2="321.5" stroke="var(--bg)" stroke-width="0.9"/>
-  <rect x="367" y="275" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <rect x="356" y="286" width="62" height="62" fill="var(--danger)" opacity="0.55"/>
-  <line x1="371.5" y1="286" x2="371.5" y2="348" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="356" y1="301.5" x2="418" y2="301.5" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="387.0" y1="286" x2="387.0" y2="348" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="356" y1="317.0" x2="418" y2="317.0" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="402.5" y1="286" x2="402.5" y2="348" stroke="var(--bg)" stroke-width="0.9"/>
-  <line x1="356" y1="332.5" x2="418" y2="332.5" stroke="var(--bg)" stroke-width="0.9"/>
-  <rect x="356" y="286" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <text x="392" y="258" font-size="15" fill="currentColor" opacity="0.55" text-anchor="middle">&#8943;</text>
-  <rect x="400" y="240" width="62" height="62" fill="var(--danger)" opacity="0.55"/>
-  <rect x="400" y="240" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <path d="M356,358 Q356,365 363,365 L402.0,365 Q409.0,365 409.0,372 Q409.0,365 416.0,365 L455,365 Q462,365 462,358" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="409" y="388" font-size="11.5" fill="currentColor" text-anchor="middle">64 &times; 16 &times; 16</text>
-
-  <text x="299" y="404" font-size="10.5" fill="var(--accent)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">1&times;1 conv: 64 &rarr; 1 ch</text>
-  <text x="299" y="418" font-size="10.5" fill="var(--accent)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">then AvgPool(16)</text>
-  <rect x="356" y="401" width="62" height="62" fill="var(--accent)" opacity="0.65"/>
-  <g stroke="var(--bg)" stroke-width="0.9">
-    <line x1="371.5" y1="401" x2="371.5" y2="463"/><line x1="387" y1="401" x2="387" y2="463"/><line x1="402.5" y1="401" x2="402.5" y2="463"/>
-    <line x1="356" y1="416.5" x2="418" y2="416.5"/><line x1="356" y1="432" x2="418" y2="432"/><line x1="356" y1="447.5" x2="418" y2="447.5"/>
-  </g>
-  <rect x="356" y="401" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1.1"/>
-  <path d="M356,472 Q356,478 362,478 L381.0,478 Q387.0,478 387.0,484 Q387.0,478 393.0,478 L412,478 Q418,478 418,472" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="387" y="500" font-size="11.5" fill="currentColor" text-anchor="middle">1 &times; 16 &times; 16</text>
-
-  <g font-size="16" font-weight="600" text-anchor="start">
-    <text x="530" y="116" fill="var(--good)">64 values</text>
-    <text x="530" y="291" fill="var(--danger)">16,384 values</text>
-    <text x="530" y="438" fill="var(--accent)">256 values</text>
-  </g>
-  <g font-size="12" fill="currentColor" opacity="0.85">
-    <text x="530" y="137">&rarr; 128 hidden = 8,192 weights</text>
-    <text x="530" y="312">&rarr; 8 hidden = 131,072 weights</text>
-    <text x="530" y="459">&rarr; 8 hidden = 2,048 weights</text>
-  </g>
-  <g font-size="11.5" fill="currentColor" opacity="0.6" font-family="ui-monospace, Menlo, monospace">
-    <text x="530" y="94">head="gap"</text>
-    <text x="530" y="269">head="pool16"</text>
-    <text x="530" y="416">head="pool16", head_reduce=1</text>
-  </g>
+  <rect x="68" y="278" width="62" height="62" fill="currentColor" opacity="0.2"/><line x1="75.8" y1="278" x2="75.8" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="285.8" x2="130" y2="285.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="83.5" y1="278" x2="83.5" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="293.5" x2="130" y2="293.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="91.2" y1="278" x2="91.2" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="301.2" x2="130" y2="301.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="99.0" y1="278" x2="99.0" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="309.0" x2="130" y2="309.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="106.8" y1="278" x2="106.8" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="316.8" x2="130" y2="316.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="114.5" y1="278" x2="114.5" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="324.5" x2="130" y2="324.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="122.2" y1="278" x2="122.2" y2="340" stroke="var(--bg)" stroke-width="0.8"/><line x1="68" y1="332.2" x2="130" y2="332.2" stroke="var(--bg)" stroke-width="0.8"/><rect x="68" y="278" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1"/><rect x="57" y="289" width="62" height="62" fill="currentColor" opacity="0.2"/><line x1="64.8" y1="289" x2="64.8" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="296.8" x2="119" y2="296.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="72.5" y1="289" x2="72.5" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="304.5" x2="119" y2="304.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="80.2" y1="289" x2="80.2" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="312.2" x2="119" y2="312.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="88.0" y1="289" x2="88.0" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="320.0" x2="119" y2="320.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="95.8" y1="289" x2="95.8" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="327.8" x2="119" y2="327.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="103.5" y1="289" x2="103.5" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="335.5" x2="119" y2="335.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="111.2" y1="289" x2="111.2" y2="351" stroke="var(--bg)" stroke-width="0.8"/><line x1="57" y1="343.2" x2="119" y2="343.2" stroke="var(--bg)" stroke-width="0.8"/><rect x="57" y="289" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1"/><rect x="46" y="300" width="62" height="62" fill="currentColor" opacity="0.2"/><line x1="53.8" y1="300" x2="53.8" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="307.8" x2="108" y2="307.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="61.5" y1="300" x2="61.5" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="315.5" x2="108" y2="315.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="69.2" y1="300" x2="69.2" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="323.2" x2="108" y2="323.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="77.0" y1="300" x2="77.0" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="331.0" x2="108" y2="331.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="84.8" y1="300" x2="84.8" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="338.8" x2="108" y2="338.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="92.5" y1="300" x2="92.5" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="346.5" x2="108" y2="346.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="100.2" y1="300" x2="100.2" y2="362" stroke="var(--bg)" stroke-width="0.8"/><line x1="46" y1="354.2" x2="108" y2="354.2" stroke="var(--bg)" stroke-width="0.8"/><rect x="46" y="300" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1"/>
+  <text x="92" y="276" font-size="15" fill="currentColor" opacity="0.5" text-anchor="middle">&#8943;</text>
+  <rect x="102" y="256" width="62" height="62" fill="currentColor" opacity="0.2"/><line x1="109.8" y1="256" x2="109.8" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="263.8" x2="164" y2="263.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="117.5" y1="256" x2="117.5" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="271.5" x2="164" y2="271.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="125.2" y1="256" x2="125.2" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="279.2" x2="164" y2="279.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="133.0" y1="256" x2="133.0" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="287.0" x2="164" y2="287.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="140.8" y1="256" x2="140.8" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="294.8" x2="164" y2="294.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="148.5" y1="256" x2="148.5" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="302.5" x2="164" y2="302.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="156.2" y1="256" x2="156.2" y2="318" stroke="var(--bg)" stroke-width="0.8"/><line x1="102" y1="310.2" x2="164" y2="310.2" stroke="var(--bg)" stroke-width="0.8"/><rect x="102" y="256" width="62" height="62" fill="none" stroke="currentColor" stroke-width="1"/>
+  <path d="M46,382 Q46,388 52,388 L99.0,388 Q105.0,388 105.0,394 Q105.0,388 111.0,388 L158,388 Q164,388 164,382" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.8"/>
+  <text x="105" y="410" font-size="11.5" fill="currentColor" text-anchor="middle">128 channels, each 8&#215;8</text>
+  <text x="105" y="230" font-size="12" fill="currentColor" text-anchor="middle">conv stack output</text>
+  <path d="M180,314 C 240,314 250,118 300,118" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrq)"/>
+  <text x="240" y="84" font-size="10" fill="var(--good)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">AdaptiveAvgPool2d(1)</text>
+  <path d="M180,300 C 240,300 250,300 300,300" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrq)"/>
+  <text x="240" y="260" font-size="10" fill="var(--accent)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">1&#215;1 conv &#8594; 8 ch, pool 4&#215;4</text>
+  <path d="M180,286 C 240,286 250,488 300,488" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrq)"/>
+  <text x="240" y="448" font-size="10" fill="var(--danger)" text-anchor="middle" font-family="ui-monospace, Menlo, monospace">1&#215;1 conv &#8594; 2 ch, pool 8&#215;8</text>
+  <rect x="322" y="98" width="15" height="15" fill="var(--good)" opacity="0.85"/><rect x="322" y="98" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1"/><rect x="315" y="105" width="15" height="15" fill="var(--good)" opacity="0.85"/><rect x="315" y="105" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1"/><rect x="308" y="112" width="15" height="15" fill="var(--good)" opacity="0.85"/><rect x="308" y="112" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1"/>
+  <text x="338" y="104" font-size="14" fill="currentColor" opacity="0.5" text-anchor="middle">&#8943;</text>
+  <rect x="346" y="92" width="15" height="15" fill="var(--good)" opacity="0.85"/><rect x="346" y="92" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1"/>
+  <path d="M308,138 Q308,143 313,143 L329.5,143 Q334.5,143 334.5,148 Q334.5,143 339.5,143 L356,143 Q361,143 361,138" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.8"/>
+  <text x="334" y="164" font-size="11" fill="currentColor" text-anchor="middle">128 &#215; 1 &#215; 1</text>
+  <rect x="326" y="276" width="34" height="34" fill="var(--accent)" opacity="0.7"/><line x1="334.5" y1="276" x2="334.5" y2="310" stroke="var(--bg)" stroke-width="0.8"/><line x1="326" y1="284.5" x2="360" y2="284.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="343.0" y1="276" x2="343.0" y2="310" stroke="var(--bg)" stroke-width="0.8"/><line x1="326" y1="293.0" x2="360" y2="293.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="351.5" y1="276" x2="351.5" y2="310" stroke="var(--bg)" stroke-width="0.8"/><line x1="326" y1="301.5" x2="360" y2="301.5" stroke="var(--bg)" stroke-width="0.8"/><rect x="326" y="276" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1"/><rect x="317" y="285" width="34" height="34" fill="var(--accent)" opacity="0.7"/><line x1="325.5" y1="285" x2="325.5" y2="319" stroke="var(--bg)" stroke-width="0.8"/><line x1="317" y1="293.5" x2="351" y2="293.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="334.0" y1="285" x2="334.0" y2="319" stroke="var(--bg)" stroke-width="0.8"/><line x1="317" y1="302.0" x2="351" y2="302.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="342.5" y1="285" x2="342.5" y2="319" stroke="var(--bg)" stroke-width="0.8"/><line x1="317" y1="310.5" x2="351" y2="310.5" stroke="var(--bg)" stroke-width="0.8"/><rect x="317" y="285" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1"/><rect x="308" y="294" width="34" height="34" fill="var(--accent)" opacity="0.7"/><line x1="316.5" y1="294" x2="316.5" y2="328" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="302.5" x2="342" y2="302.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="325.0" y1="294" x2="325.0" y2="328" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="311.0" x2="342" y2="311.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="333.5" y1="294" x2="333.5" y2="328" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="319.5" x2="342" y2="319.5" stroke="var(--bg)" stroke-width="0.8"/><rect x="308" y="294" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1"/>
+  <text x="352" y="276" font-size="14" fill="currentColor" opacity="0.5" text-anchor="middle">&#8943;</text>
+  <rect x="362" y="266" width="34" height="34" fill="var(--accent)" opacity="0.7"/><line x1="370.5" y1="266" x2="370.5" y2="300" stroke="var(--bg)" stroke-width="0.8"/><line x1="362" y1="274.5" x2="396" y2="274.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="379.0" y1="266" x2="379.0" y2="300" stroke="var(--bg)" stroke-width="0.8"/><line x1="362" y1="283.0" x2="396" y2="283.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="387.5" y1="266" x2="387.5" y2="300" stroke="var(--bg)" stroke-width="0.8"/><line x1="362" y1="291.5" x2="396" y2="291.5" stroke="var(--bg)" stroke-width="0.8"/><rect x="362" y="266" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1"/>
+  <path d="M308,336 Q308,341 313,341 L347.0,341 Q352.0,341 352.0,346 Q352.0,341 357.0,341 L391,341 Q396,341 396,336" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.8"/>
+  <text x="352" y="362" font-size="11" fill="currentColor" text-anchor="middle">8 &#215; 4 &#215; 4</text>
+  <rect x="320" y="470" width="50" height="50" fill="var(--danger)" opacity="0.6"/><line x1="326.2" y1="470" x2="326.2" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="476.2" x2="370" y2="476.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="332.5" y1="470" x2="332.5" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="482.5" x2="370" y2="482.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="338.8" y1="470" x2="338.8" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="488.8" x2="370" y2="488.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="345.0" y1="470" x2="345.0" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="495.0" x2="370" y2="495.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="351.2" y1="470" x2="351.2" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="501.2" x2="370" y2="501.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="357.5" y1="470" x2="357.5" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="507.5" x2="370" y2="507.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="363.8" y1="470" x2="363.8" y2="520" stroke="var(--bg)" stroke-width="0.8"/><line x1="320" y1="513.8" x2="370" y2="513.8" stroke="var(--bg)" stroke-width="0.8"/><rect x="320" y="470" width="50" height="50" fill="none" stroke="currentColor" stroke-width="1"/>
+  <rect x="308" y="482" width="50" height="50" fill="var(--danger)" opacity="0.6"/><line x1="314.2" y1="482" x2="314.2" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="488.2" x2="358" y2="488.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="320.5" y1="482" x2="320.5" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="494.5" x2="358" y2="494.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="326.8" y1="482" x2="326.8" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="500.8" x2="358" y2="500.8" stroke="var(--bg)" stroke-width="0.8"/><line x1="333.0" y1="482" x2="333.0" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="507.0" x2="358" y2="507.0" stroke="var(--bg)" stroke-width="0.8"/><line x1="339.2" y1="482" x2="339.2" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="513.2" x2="358" y2="513.2" stroke="var(--bg)" stroke-width="0.8"/><line x1="345.5" y1="482" x2="345.5" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="519.5" x2="358" y2="519.5" stroke="var(--bg)" stroke-width="0.8"/><line x1="351.8" y1="482" x2="351.8" y2="532" stroke="var(--bg)" stroke-width="0.8"/><line x1="308" y1="525.8" x2="358" y2="525.8" stroke="var(--bg)" stroke-width="0.8"/><rect x="308" y="482" width="50" height="50" fill="none" stroke="currentColor" stroke-width="1"/>
+  <path d="M308,540 Q308,545 313,545 L334.0,545 Q339.0,545 339.0,550 Q339.0,545 344.0,545 L365,545 Q370,545 370,540" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.8"/>
+  <text x="339" y="566" font-size="11" fill="currentColor" text-anchor="middle">2 &#215; 8 &#215; 8</text>
+  <path d="M420,118 C 500,118 520,300 596,300" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.75" marker-end="url(#arrq)"/>
+  <path d="M420,300 C 500,300 520,300 596,300" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.75" marker-end="url(#arrq)"/>
+  <path d="M420,488 C 500,488 520,300 596,300" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.75" marker-end="url(#arrq)"/>
+  <rect x="604" y="180" width="26" height="240" fill="currentColor" opacity="0.22"/>
+  <rect x="604" y="180" width="26" height="240" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <text x="617" y="166" font-size="13" fill="currentColor" text-anchor="middle" font-weight="600">128</text>
+  <text x="617" y="440" font-size="11" fill="currentColor" text-anchor="middle">values, either way</text>
+  <line x1="636" y1="300" x2="690" y2="300" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrq)"/>
+  <rect x="696" y="272" width="54" height="56" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <text x="723" y="305" font-size="13" fill="currentColor" text-anchor="middle">8</text>
+  <text x="723" y="256" font-size="10.5" fill="currentColor" opacity="0.7" text-anchor="middle">hidden</text>
+  <line x1="756" y1="300" x2="800" y2="300" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrq)"/>
+  <circle cx="826" cy="300" r="20" fill="none" stroke="currentColor" stroke-width="1.2"/>
+  <text x="826" y="305" font-size="13" fill="currentColor" text-anchor="middle">1</text>
+  <text x="826" y="342" font-size="10.5" fill="currentColor" opacity="0.7" text-anchor="middle">logit</text>
+  <text x="440" y="88" font-size="12" fill="var(--good)" font-weight="600">gap</text>
+  <text x="440" y="104" font-size="10.5" fill="currentColor" opacity="0.7">keeps all 128 channels</text>
+  <text x="440" y="270" font-size="12" fill="var(--accent)" font-weight="600">mixed</text>
+  <text x="440" y="286" font-size="10.5" fill="currentColor" opacity="0.7">8 feature groups, coarse map</text>
+  <text x="440" y="458" font-size="12" fill="var(--danger)" font-weight="600">spatial</text>
+  <text x="440" y="474" font-size="10.5" fill="currentColor" opacity="0.7">2 usability maps, full grid</text>
 </svg>
-<figcaption>All three heads pool; they differ in what survives. GAP keeps one number per channel and
-no spatial layout. Pooling to 16&times;16 across all 64 channels keeps everything and is by far the
-most expensive. Collapsing to a single channel first with a 1&times;1 convolution keeps a coarse
-<em>usability map</em> &mdash; where in the tile the imagery is readable &mdash; for less than GAP
-costs, because the flattened vector is 64&times; shorter. Stacks show 4 representative channels of
-64; braces give the true dimensions.</figcaption>
+<figcaption>The same operation three ways: reduce to <em>K</em> channels, pool to
+<em>N</em>&#215;<em>N</em>. All three land on <strong>128 values</strong> feeding an identical
+classifier, so the models differ by under 0.5% in size &mdash; what changes is only how those 128
+numbers are split between knowing <em>what</em> and knowing <em>where</em>.</figcaption>
 </figure>
-
-<h4>Why the wider input costs so much more</h4>
-<p>
-That pooled block is flattened into a vector and fed to a <strong>fully connected</strong> layer
-&mdash; every input value gets its own weight to every hidden unit. So the weight count is not the
-number of inputs, nor the number of hidden units, but their <em>product</em>:
-</p>
-<figure>
-<svg viewBox="0 0 980 340" role="img" aria-label="Two fully connected layers. With the GAP head, 64 input values connect to 128 hidden units: 64 times 128 equals 8,192 weights. With a 1x1 convolution reducing to one channel before pooling to 16 by 16, 256 input values connect to 8 hidden units: 256 times 8 equals 2,048 weights. Four representative nodes are drawn in each column; the braces give the true counts.">
-  <text x="190" y="34" font-size="13" fill="var(--good)" text-anchor="middle" font-weight="600">head="gap"</text>
-  <g stroke="currentColor" stroke-width="0.5" opacity="0.38"><line x1="120" y1="95" x2="260" y2="105"/><line x1="120" y1="95" x2="260" y2="148"/><line x1="120" y1="95" x2="260" y2="191"/><line x1="120" y1="95" x2="260" y2="234"/><line x1="120" y1="135" x2="260" y2="105"/><line x1="120" y1="135" x2="260" y2="148"/><line x1="120" y1="135" x2="260" y2="191"/><line x1="120" y1="135" x2="260" y2="234"/><line x1="120" y1="175" x2="260" y2="105"/><line x1="120" y1="175" x2="260" y2="148"/><line x1="120" y1="175" x2="260" y2="191"/><line x1="120" y1="175" x2="260" y2="234"/><line x1="120" y1="215" x2="260" y2="105"/><line x1="120" y1="215" x2="260" y2="148"/><line x1="120" y1="215" x2="260" y2="191"/><line x1="120" y1="215" x2="260" y2="234"/></g>
-  <g fill="var(--good)" stroke="currentColor" stroke-width="1" opacity="0.9"><circle cx="120" cy="95" r="10"/><circle cx="120" cy="135" r="10"/><circle cx="120" cy="175" r="10"/><circle cx="120" cy="215" r="10"/></g>
-  <g fill="currentColor" opacity="0.28"><circle cx="260" cy="105" r="11"/><circle cx="260" cy="148" r="11"/><circle cx="260" cy="191" r="11"/><circle cx="260" cy="234" r="11"/></g>
-  <text x="120" y="252" font-size="17" fill="currentColor" opacity="0.55" text-anchor="middle">&#8942;</text>
-  <text x="260" y="268" font-size="17" fill="currentColor" opacity="0.55" text-anchor="middle">&#8942;</text>
-  <path d="M100,85 Q93,85 93,92 L93,149.5 Q93,156.5 86,156.5 Q93,156.5 93,163.5 L93,221 Q93,228 100,228" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="82" y="152" font-size="12" fill="currentColor" text-anchor="end">64 values</text>
-  <text x="82" y="168" font-size="10.5" fill="currentColor" text-anchor="end" opacity="0.65">of 64</text>
-  <path d="M282,95 Q289,95 289,102 L289,164.0 Q289,171.0 296,171.0 Q289,171.0 289,178.0 L289,240 Q289,247 282,247" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="302" y="167" font-size="12" fill="currentColor">128 hidden</text>
-  <text x="302" y="183" font-size="10.5" fill="currentColor" opacity="0.65">of 128</text>
-  <text x="190" y="320" font-size="14" fill="var(--good)" text-anchor="middle" font-weight="600">64 &times; 128 = 8,192 weights</text>
-  <line x1="490" y1="20" x2="490" y2="330" stroke="currentColor" stroke-width="1" opacity="0.22"/>
-  <text x="690" y="34" font-size="13" fill="var(--accent)" text-anchor="middle" font-weight="600">head="pool16", head_reduce=1</text>
-  <g stroke="currentColor" stroke-width="0.5" opacity="0.38"><line x1="620" y1="95" x2="760" y2="105"/><line x1="620" y1="95" x2="760" y2="148"/><line x1="620" y1="95" x2="760" y2="191"/><line x1="620" y1="95" x2="760" y2="234"/><line x1="620" y1="135" x2="760" y2="105"/><line x1="620" y1="135" x2="760" y2="148"/><line x1="620" y1="135" x2="760" y2="191"/><line x1="620" y1="135" x2="760" y2="234"/><line x1="620" y1="175" x2="760" y2="105"/><line x1="620" y1="175" x2="760" y2="148"/><line x1="620" y1="175" x2="760" y2="191"/><line x1="620" y1="175" x2="760" y2="234"/><line x1="620" y1="215" x2="760" y2="105"/><line x1="620" y1="215" x2="760" y2="148"/><line x1="620" y1="215" x2="760" y2="191"/><line x1="620" y1="215" x2="760" y2="234"/></g>
-  <g fill="var(--accent)" stroke="currentColor" stroke-width="1" opacity="0.9"><circle cx="620" cy="95" r="10"/><circle cx="620" cy="135" r="10"/><circle cx="620" cy="175" r="10"/><circle cx="620" cy="215" r="10"/></g>
-  <g fill="currentColor" opacity="0.28"><circle cx="760" cy="105" r="11"/><circle cx="760" cy="148" r="11"/><circle cx="760" cy="191" r="11"/><circle cx="760" cy="234" r="11"/></g>
-  <text x="620" y="252" font-size="17" fill="currentColor" opacity="0.55" text-anchor="middle">&#8942;</text>
-  <text x="760" y="268" font-size="17" fill="currentColor" opacity="0.55" text-anchor="middle">&#8942;</text>
-  <path d="M600,85 Q593,85 593,92 L593,149.5 Q593,156.5 586,156.5 Q593,156.5 593,163.5 L593,221 Q593,228 600,228" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="582" y="152" font-size="12" fill="currentColor" text-anchor="end">256 values</text>
-  <text x="582" y="168" font-size="10.5" fill="currentColor" text-anchor="end" opacity="0.65">of 256</text>
-  <path d="M782,95 Q789,95 789,102 L789,164.0 Q789,171.0 796,171.0 Q789,171.0 789,178.0 L789,240 Q789,247 782,247" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.8"/>
-  <text x="802" y="167" font-size="12" fill="currentColor">8 hidden</text>
-  <text x="802" y="183" font-size="10.5" fill="currentColor" opacity="0.65">of 8</text>
-  <text x="690" y="320" font-size="14" fill="var(--accent)" text-anchor="middle" font-weight="600">256 &times; 8 = 2,048 weights</text>
-</svg>
-<figcaption>Every input connects to every hidden unit, so the weight count is the
-<em>product</em> of the two column sizes &mdash; which is why the input width dominates. Four
-representative nodes are drawn per column; the braces give the real counts. Keeping all 64
-channels at 16&times;16 instead would put 16,384 nodes in the left column of the right-hand panel,
-and 16,384&thinsp;&times;&thinsp;8 = 131,072 weights.</figcaption>
-</figure>
-<p>
-Which is why the hidden width has to shrink when the head widens. The same
-<code>pool16</code> block behind a 128-unit layer would rebuild the problem the GAP head was
-adopted to solve:
-</p>
 <table>
-<tr><th>head</th><th>flattened inputs</th><th>hidden</th><th>weights there</th><th>whole model</th></tr>
-<tr><td><code>gap</code></td><td class="num">64</td><td class="num">128</td><td class="num">8,192</td><td class="num">32,401</td></tr>
-<tr><td><code>pool16</code>, <code>head_reduce=1</code></td><td class="num">256</td><td class="num">8</td><td class="num">2,048</td><td class="num"><span class="good-text">26,084</span></td></tr>
-<tr><td><code>pool16</code>, all 64 channels</td><td class="num">16,384</td><td class="num">8</td><td class="num">131,072</td><td class="num">155,041</td></tr>
-<tr><td><code>pool16</code>, all 64 ch, <span class="danger-text">128 hidden</span></td><td class="num">16,384</td><td class="num">128</td><td class="num"><span class="danger-text">2,097,152</span></td><td class="num"><span class="danger-text">2,121,361</span></td></tr>
+<tr><th>head</th><th>K channels</th><th>N grid</th><th>values</th><th>model params</th><th>what it keeps</th></tr>
+<tr><td><code>gap</code></td><td class="num">128</td><td class="num">1&times;1</td><td class="num">128</td><td class="num">228,609</td><td><em>what</em> features are present; no location</td></tr>
+<tr><td><code>mixed</code></td><td class="num">8</td><td class="num">4&times;4</td><td class="num">128</td><td class="num">229,657</td><td>8 feature groups on a coarse map</td></tr>
+<tr><td><code>spatial</code></td><td class="num">2</td><td class="num">8&times;8</td><td class="num">128</td><td class="num">228,871</td><td>2 usability maps at the full grid</td></tr>
 </table>
 <p>
-Counts are for a four-band input. Which head is better is an open question &mdash; GAP assumes
-usability is a property of the tile as a whole, <code>pool16</code> assumes the spatial
-arrangement carries information &mdash; and the two are being compared directly in the current
-sweep.
+The three models differ in size by <strong>0.46%</strong>, because the head costs one to two
+thousand parameters against a 227,568-parameter stack. So any difference between them is
+attributable to <em>inductive bias</em> rather than capacity &mdash; the confound that made
+earlier width comparisons uninterpretable.
+</p>
+
+<h3>Why the flattened width, not the hidden width, sets the cost</h3>
+<p>
+The vector feeds a fully connected layer, where every input has its own weight to every hidden
+unit &mdash; so the weight count is the <em>product</em> of the two, and the input width dominates.
+This is worth internalizing because it is the trap the architecture fell into once already:
+</p>
+<table>
+<tr><th>head</th><th>flattened</th><th>hidden</th><th>weights there</th><th>whole model</th></tr>
+<tr><td><code>gap</code> / <code>mixed</code> / <code>spatial</code></td><td class="num">128</td><td class="num">8</td><td class="num">1,032</td><td class="num">~229,000</td></tr>
+<tr><td>all 128 channels at 8&times;8</td><td class="num">8,192</td><td class="num">8</td><td class="num">65,536</td><td class="num">293,000</td></tr>
+<tr><td>all 128 channels at 8&times;8, <span class="danger-text">128 hidden</span></td><td class="num">8,192</td><td class="num">128</td><td class="num"><span class="danger-text">1,048,576</span></td><td class="num"><span class="danger-text">1,276,401</span></td></tr>
+</table>
+<p>
+Keeping the channel axis <em>and</em> the spatial axis at full width is what makes a head
+expensive. Reducing one of them &mdash; either to a single value per channel, or to a couple of
+channels per location &mdash; is what keeps all three of these heads affordable, and it is why
+adaptive pooling appears in every one of them: it fixes the output grid regardless of input size,
+so parameter count is a design decision rather than a side effect of image resolution.
 </p>
 
 <h2>6. Baselines any model must beat</h2>
@@ -776,24 +708,39 @@ fold and are read only by the final model. A fold reporting
 
 <h3>The grid</h3>
 <p>
-32 configurations &mdash; 4 band sets (<code>rgb</code>, <code>rgb+nir</code>,
-<code>rgb+swir16</code>, <code>all6</code>) &times; 2 widths &times; 2 learning rates &times; 2
-optimizers &mdash; each scored on 3 identical lake-grouped folds. The folds are a function of
-<code>(labels, n_folds, seed)</code> alone, so two configurations always differ by architecture,
-never by data.
+Twelve configurations &mdash; <strong>4 band sets &times; 3 heads</strong> &mdash; each scored on
+5 identical lake-grouped folds. Folds are a function of <code>(labels, n_folds, seed)</code>
+alone, so two configurations always differ by architecture, never by data.
+</p>
+<table>
+<tr><th>axis</th><th>values</th><th>the question it answers</th></tr>
+<tr><td><code>bands</code></td><td><code>rgb</code>, <code>rgb+nir</code>, <code>rgb+swir16</code>, <code>rgb+swir22</code></td><td>Does any single non-visible band help, and does it matter which?</td></tr>
+<tr><td><code>head</code></td><td><code>gap</code>, <code>mixed</code>, <code>spatial</code></td><td>Is usability a property of the tile as a whole, or of where the cloud sits?</td></tr>
+</table>
+<p>
+The band question has a physical basis: SWIR varies far more than the visible bands &mdash;
+coefficient of variation above 1.0 against 0.20&ndash;0.23 &mdash; and that dynamic range is
+exactly what could separate cloud from bright ice, which look alike in RGB. RGB alone is the
+control; each of the other three sets adds exactly one band, so the comparison is clean.
 </p>
 <p>
-The central question is the band question: does anything beyond true colour help a human-defined
-usability call? There is a physical reason to think so. The band statistics show SWIR varying far
-more than the visible bands &mdash; coefficient of variation above 1.0, against 0.20&ndash;0.23
-&mdash; and that dynamic range is exactly what could separate cloud from bright ice, which look
-alike in RGB.
+Everything else is held fixed: the six-block stack, lr&nbsp;1e-3, AdamW, cosine annealing to ~0,
+<strong>200 epochs</strong>, <strong>512&times;512</strong> input, batch 32, weight decay 1e-4,
+dropout 0.3, and no augmentation. Two of those deserve a note.
 </p>
 <p>
-Everything else is held fixed &mdash; GAP head, BatchNorm, dropout 0.3, augmentation, 40 epochs,
-batch 32, and <strong>256&times;256</strong> input. The grid can run at 256 for roughly 4&times;
-the throughput precisely because the GAP head made the model resolution-independent; the winner
-can be re-run at 512 afterwards if resolution turns out to matter.
+<strong>512&thinsp;px is the deployment resolution</strong>, and inference uses it everywhere, so
+selection runs there too &mdash; a model chosen at one resolution and applied at another is not
+the model that was chosen. <strong>Cosine annealing</strong> is not a free extra: at constant
+learning rate the epoch-to-epoch swing in validation loss was larger than the trend it was
+supposed to reveal, which made "best checkpoint" partly a lottery. Annealing to ~0 cut that swing
+roughly eightfold and settled the tail, so the argmin means something.
+</p>
+<p>
+Three axes are deliberately <em>not</em> in the grid, because each was measured twice and came
+back inside the fold spread: conv width (+0.0001, then +0.0010), learning rate (0.9734 vs 0.9734),
+and optimizer (+0.0012, with AdamW ahead and therefore fixed). Re-testing settled axes costs
+budget that the open questions need.
 </p>
 
 <h3>Reading the table</h3>
