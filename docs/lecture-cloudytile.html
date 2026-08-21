@@ -343,7 +343,7 @@ widths [16,&thinsp;32,&thinsp;64,&thinsp;64,&thinsp;96,&thinsp;128]. Input is on
 normalized bands at 512&times;512; output is a single logit.
 </p>
 <figure>
-<svg viewBox="0 0 916 310" role="img" aria-label="The convolutional stack in six blocks. A 4 by 512 by 512 input passes through six conv-BatchNorm-ReLU-maxpool blocks with channel widths 16, 32, 64, 64, 96 and 128, halving the spatial grid each time: 256, 128, 64, 32, 16 and finally 8 by 8. The receptive field of one output unit grows from 4 pixels to 190 pixels.">
+<svg viewBox="-60 0 976 310" role="img" aria-label="The convolutional stack in six blocks. A 4 by 512 by 512 input passes through six conv-BatchNorm-ReLU-maxpool blocks with channel widths 16, 32, 64, 64, 96 and 128, halving the spatial grid each time: 256, 128, 64, 32, 16 and finally 8 by 8. The receptive field of one output unit grows from 4 pixels to 190 pixels.">
   <defs>
     <marker id="arrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -586,13 +586,13 @@ when the split does.
 <h2>7. Choosing a model without cheating</h2>
 <p>
 Lake-grouping fixes <em>how</em> data is divided. It says nothing about a second leak, which is
-easier to miss: if you train 32 configurations and keep the one that scored best, the winner's
+easier to miss: if you train 16 configurations and keep the one that scored best, the winner's
 score is partly a measure of luck, and the data those scores were computed on has been used to
 make a decision. That data is no longer a clean test set &mdash; it is training data for the
 selection step.
 </p>
 <figure>
-<svg viewBox="0 0 960 320" role="img" aria-label="The 400 labeled lakes split into 280 train, 40 validation and 80 test. The 280 and 40 form a 320-lake development pool in which every decision is made; it is divided into three lake-grouped folds, each holding out about 107 lakes. The 80 test lakes sit apart and are read once, by the final model.">
+<svg viewBox="0 0 960 372" role="img" aria-label="The 400 labeled lakes split into 280 train, 40 validation and 80 test. The 280 and 40 form a 320-lake development pool in which every decision is made; it is divided into five lake-grouped folds, each holding out 64 lakes. The 80 test lakes sit apart and are read once, by the final model.">
   <defs>
     <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -611,39 +611,48 @@ selection step.
   </g>
   <text x="810" y="74" font-size="12" fill="var(--danger)" text-anchor="middle" font-weight="600">test &mdash; 80 lakes</text>
   <line x1="410" y1="92" x2="410" y2="112" stroke="currentColor" stroke-width="1.3" marker-end="url(#arr4)"/>
-  <text x="424" y="107" font-size="11" fill="currentColor" opacity="0.75" font-family="ui-monospace, Menlo, monospace">3 lake-grouped folds &times; 32 configs</text>
-  <g>
-    <rect x="90"  y="122" width="213" height="24" fill="var(--accent)"/>
-    <rect x="303" y="122" width="427" height="24" fill="currentColor" opacity="0.22"/>
-    <rect x="90"  y="156" width="213" height="24" fill="currentColor" opacity="0.22"/>
-    <rect x="303" y="156" width="213" height="24" fill="var(--accent)"/>
-    <rect x="516" y="156" width="214" height="24" fill="currentColor" opacity="0.22"/>
-    <rect x="90"  y="190" width="426" height="24" fill="currentColor" opacity="0.22"/>
-    <rect x="516" y="190" width="214" height="24" fill="var(--accent)"/>
+  <text x="424" y="107" font-size="11" fill="currentColor" opacity="0.75" font-family="ui-monospace, Menlo, monospace">5 lake-grouped folds &times; 16 configs</text>
+  <g fill="currentColor" opacity="0.22">
+    <rect x="90" y="122" width="640" height="24"/>
+    <rect x="90" y="152" width="640" height="24"/>
+    <rect x="90" y="182" width="640" height="24"/>
+    <rect x="90" y="212" width="640" height="24"/>
+    <rect x="90" y="242" width="640" height="24"/>
+  </g>
+  <g fill="var(--accent)">
+    <rect x="90"  y="122" width="128" height="24"/>
+    <rect x="218" y="152" width="128" height="24"/>
+    <rect x="346" y="182" width="128" height="24"/>
+    <rect x="474" y="212" width="128" height="24"/>
+    <rect x="602" y="242" width="128" height="24"/>
   </g>
   <g font-size="11.5" fill="currentColor" text-anchor="end" opacity="0.8">
     <text x="82" y="139">fold 0</text>
-    <text x="82" y="173">fold 1</text>
-    <text x="82" y="207">fold 2</text>
+    <text x="82" y="169">fold 1</text>
+    <text x="82" y="199">fold 2</text>
+    <text x="82" y="229">fold 3</text>
+    <text x="82" y="259">fold 4</text>
   </g>
   <g font-size="10.5" fill="var(--bg)" text-anchor="middle">
-    <text x="196" y="139">held out</text>
-    <text x="409" y="173">held out</text>
-    <text x="623" y="207">held out</text>
+    <text x="154" y="139">held out</text>
+    <text x="282" y="169">held out</text>
+    <text x="410" y="199">held out</text>
+    <text x="538" y="229">held out</text>
+    <text x="666" y="259">held out</text>
   </g>
-  <text x="516" y="139" font-size="10.5" fill="currentColor" opacity="0.8" text-anchor="middle">fit (minus a 15% inner-validation slice)</text>
-  <text x="410" y="238" font-size="11" fill="currentColor" opacity="0.75" text-anchor="middle">inner validation picks the epoch and the decision threshold &mdash; never the held-out lakes</text>
+  <text x="474" y="139" font-size="10.5" fill="currentColor" opacity="0.8" text-anchor="middle">fit (minus a 15% inner-validation slice)</text>
+  <text x="410" y="288" font-size="11" fill="currentColor" opacity="0.75" text-anchor="middle">inner validation picks the epoch and the decision threshold &mdash; never the held-out lakes</text>
   <g stroke="var(--danger)" stroke-width="1.4" fill="none" stroke-dasharray="5 5" marker-end="url(#arr4)">
-    <line x1="810" y1="92" x2="810" y2="256"/>
+    <line x1="810" y1="92" x2="810" y2="308"/>
   </g>
-  <rect x="688" y="264" width="244" height="40" rx="8" fill="none" stroke="var(--danger)" stroke-width="1.6"/>
+  <rect x="688" y="316" width="244" height="40" rx="8" fill="none" stroke="var(--danger)" stroke-width="1.6"/>
   <g font-size="11.5" fill="var(--danger)" text-anchor="middle">
-    <text x="810" y="281">winner retrained on all 320,</text>
-    <text x="810" y="297">scored here exactly once</text>
+    <text x="810" y="333">winner retrained on all 320,</text>
+    <text x="810" y="349">scored here exactly once</text>
   </g>
 </svg>
 <figcaption>Model selection lives entirely inside the 320 development lakes. The 80 test lakes are
-untouched by all 96 (config, fold) runs, so the single number they eventually produce has not been
+untouched by all 80 (config, fold) runs, so the single number they eventually produce has not been
 optimized against.</figcaption>
 </figure>
 
@@ -692,9 +701,8 @@ out exactly once, by a model that never saw it.
 </svg>
 <figcaption>One configuration, scored five times. Its reported score is the mean of the five;
 the standard deviation across them is the <em>fold spread</em>, and it is what separates a real
-difference between configurations from a lucky draw. Drawn here at k&nbsp;=&nbsp;5, as the
-finalist rerun uses; the 32-config grid above runs the same scheme at k&nbsp;=&nbsp;3, holding out
-~107 lakes per fold instead of 64.</figcaption>
+difference between configurations from a lucky draw. Drawn at k&nbsp;=&nbsp;5, which is what the
+sweep runs.</figcaption>
 </figure>
 <p>
 Both numbers matter. The <strong>mean</strong> is the configuration's score. The
@@ -713,16 +721,18 @@ frames than others. A gap between two configurations smaller than the spread is 
 <p>
 More folds makes each individual estimate noisier, since fewer lakes are held out &mdash; but you
 average more of them, and every model trains on more data. The net effect is a tighter estimate of
-the configuration's true score. The config grid runs at <strong>k = 3</strong>, which is enough to
-answer coarse questions like "do extra bands help" across 32 configurations cheaply. The finalist
-rerun uses <strong>k = 5</strong>, because by that point the remaining question is a near-tie
-between a handful of configurations and precision is exactly what is missing.
+the configuration's true score. The sweep runs at <strong>k = 5</strong> throughout. Sixteen
+configurations is few enough to afford the extra fits, and the questions left are near-ties where
+the whole difficulty is telling a real gap from a lucky draw &mdash; precision is exactly what is
+needed. Cutting to k&nbsp;=&nbsp;3 would save a third of the compute and give back a standard
+error 24% larger.
 </p>
 <p>
 One consequence to keep straight: <strong>a k = 3 score and a k = 5 score are not comparable.</strong>
-They are means over different partitions with different held-out sizes. Configurations are only
-ever ranked against others scored on identical folds &mdash; which they always are, because folds
-are a function of <code>(labels, n_folds, seed)</code> and nothing about the configuration.
+They are means over different partitions with different held-out sizes, so scores from an earlier
+sweep at a different k cannot be read alongside these. Configurations are only ever ranked against
+others scored on identical folds &mdash; which they always are within one sweep, because folds are
+a function of <code>(labels, n_folds, seed)</code> and nothing about the configuration.
 </p>
 <div class="callout">
 <strong>A naming trap.</strong> Each result JSON carries <code>test_auc</code>,
@@ -778,7 +788,7 @@ it would compare operating points and models at the same time. AUC is threshold-
 </p>
 <p>
 The number that makes the table readable is the <strong>fold-to-fold spread</strong>. Each
-configuration is three numbers, and the standard deviation across them says how much of any
+configuration is five numbers, and the standard deviation across them says how much of any
 apparent gap is noise. <code>--summarize</code> prints the ranked table and warns when the gap
 between first and second place is smaller than that spread &mdash; in which case the honest
 reading is a tie, and the rule is to take the simpler configuration rather than the nominal
@@ -832,24 +842,39 @@ evaluation), is in <a href="CROSSVAL.md">docs/CROSSVAL.md</a>.
 sbatch slurm/extract_training_nc.sh
 sbatch slurm/compute_band_stats.sh</code></pre>
 <h3>Select a configuration (Sherlock)</h3>
-<pre><code>sbatch slurm/run_cv_grid.sh          # 32 array tasks, 4 concurrent GPUs
+<pre><code>sbatch slurm/run_cv_bandhead.sh      # 16 array tasks, 4 concurrent GPUs
 python3 engine/run_cv_grid.py --out_dir &lt;results&gt; --summarize
 # --split_dir restricts folds to the 320 dev lakes, so selection
 # never sees the 80 test lakes. Each (config, fold) writes one JSON
 # and existing ones are skipped, so a timed-out array can be resubmitted.
 
-wandb sync &lt;wandb_dir&gt;/offline-run-*    # from a LOGIN node; compute nodes have no internet</code></pre>
+# Each task prints "projected N h/fold" after its first epoch. Check it:
+# that is whether the array fits its walltime, known in minute one.
+
+wandb sync &lt;wandb_dir&gt;/offline-run-20260821_*   # from a LOGIN node -- compute nodes have no internet</code></pre>
+<p>
+<strong>Date-scope that glob.</strong> A bare <code>offline-run-*</code> matches every run the
+directory has ever held &mdash; hundreds of them &mdash; and wandb answers HTTP 410 for each one
+already deleted server-side, burying the runs you actually want behind a wall of errors.
+</p>
 <h3>Train the final model (Sherlock)</h3>
-<pre><code>python3 engine/run_training.py \
-    --labels_csv labels/labels.csv \
-    --split_dir splits/cloudytile_v1 \
-    --nc_dir /oak/.../data/cloudytile/training_nc_10k \
-    --band_stats /oak/.../data/cloudytile/band_stats_10k.json \
-    --nc_channels red green blue nir \
-    --optimize_metric loss --save_path best_model.pth
+<pre><code># edit WINNER_BANDS and WINNER_HEAD at the top from the --summarize table, then:
+sbatch slurm/run_final_model.sh
 # the only run that touches the 80 test lakes. Test metrics are computed on the
 # restored best-validation checkpoint -- the same weights written to --save_path --
 # at a threshold chosen on the validation lakes.</code></pre>
+<p>
+Use the wrapper rather than calling <code>run_training.py</code> by hand. Its defaults do
+<em>not</em> match the regime the sweep selected under &mdash; <code>weight_decay</code> defaults
+to 0.0 against the sweep's 1e-4, <code>optimizer</code> to <code>adam</code> against
+<code>adamw</code>, <code>lr_schedule</code> to <code>none</code> against cosine &mdash; so a
+hand-written command that omits any of them trains a different model than the one that won. The
+wrapper passes all eleven explicitly, refuses to start while the winner fields say
+<code>TBD</code>, and looks the head up rather than making you transcribe it: <code>spatial</code>
+<em>is</em> <code>pool8&nbsp;+&nbsp;head_reduce&nbsp;2</code>, and getting
+<code>head_reduce</code> wrong does not fail &mdash; it silently trains a far larger model under
+the winning configuration's name.
+</p>
 <h3>Inference over the lake archive</h3>
 <pre><code>from cloudytile.inference import process_directory
 process_directory(nc_dir=..., model_path="best_model.pth",
@@ -864,7 +889,7 @@ frames of the same lake &mdash; the group is the unit of independence. The guard
 without it the leak is invisible and every score is inflated.</li>
 <li><strong>Freeze the split, don't seed it.</strong> A seed-derived split moves every time the
 label file grows, so two results are never comparable. The lake ids are committed.</li>
-<li><strong>Selection is training.</strong> Picking the best of 32 configurations consumes the
+<li><strong>Selection is training.</strong> Picking the best of 16 configurations consumes the
 data you picked on. The 80 test lakes are held back from every comparison for exactly that
 reason.</li>
 <li><strong>Report the dumb baseline, on the same holdout.</strong> A <code>stat()</code> call
