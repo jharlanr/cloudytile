@@ -126,14 +126,44 @@ BANDHEAD_GRID = [
     for b, h in itertools.product(BANDHEAD_BANDS, HEADS)
 ]
 
-GRIDS = {"v1": GRID, "bandhead": BANDHEAD_GRID}
+# The annealing-horizon sweep. The bands x heads sweep answered its own
+# question and raised a new one: median best_epoch was 30 and the maximum over
+# all 80 folds was 67, so nothing came close to the 200-epoch budget. Because
+# CosineAnnealingLR takes T_max from --epochs, every one of those checkpoints
+# was found at essentially full learning rate, and the annealing that was
+# supposed to settle the tail did its work long after the model had stopped
+# improving. --epochs is therefore not just a budget here, it is the shape of
+# the learning-rate schedule, and it belongs on an axis.
+#
+# THE HEAD RIDES ALONG DELIBERATELY. gap/mixed/spatial finished within 0.0010
+# of each other at 200 epochs -- a tie -- and a tie decided under one schedule
+# does not transfer to another. Selecting the head at 200 and then deploying it
+# at 60 would repeat the resolution mistake: a config chosen under conditions
+# it is not run under. Both are settled here, on dev lakes, together.
+#
+# "full" is dropped: it lost to all three matched heads (-0.0024 to -0.0038,
+# 16-17 folds of 20) with 2.6x their fold spread. Bands are fixed at
+# rgb+swir16, which beat rgb by +0.0058 winning 20/20 folds; rgb+swir22 is
+# statistically interchangeable with it (+0.0006, 16/20).
+EPOCH_HORIZONS = [40, 60, 80, 120, 200]
+EPOCHS_HEADS = ["gap", "mixed", "spatial"]
+EPOCHS_GRID = [
+    {"bands": "rgb+swir16", "head": h, "arch": "deep6", "lr": 1e-3,
+     "optimizer": "adamw", "epochs": e}
+    for h, e in itertools.product(EPOCHS_HEADS, EPOCH_HORIZONS)
+]
+
+GRIDS = {"v1": GRID, "bandhead": BANDHEAD_GRID, "epochs": EPOCHS_GRID}
 
 
 def config_name(cfg: dict, head: str = "gap") -> str:
     """Result-file and wandb name. The head suffix is omitted for "gap" so that
     names from earlier grids, which predate the head axis, still match."""
     if "head" in cfg:                      # bands x heads sweep
-        return f"{cfg['bands']}_{cfg['head']}"
+        base = f"{cfg['bands']}_{cfg['head']}"
+        # Only the epochs sweep carries an "epochs" key, so bandhead names are
+        # unchanged -- its 80 finished result files keep matching.
+        return base if "epochs" not in cfg else f"{base}_e{cfg['epochs']}"
     base = f"{cfg['bands']}_{cfg['arch']}_lr{cfg['lr']:g}_{cfg['optimizer']}"
     return base if head == "gap" else f"{base}_{head}"
 
@@ -177,6 +207,10 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         "head": args.head, "head_reduce": args.head_reduce,
         "fc_layers": args.fc_layers,
     }
+    # Only the epochs sweep puts this in the config; every other grid takes the
+    # CLI value. It sets BOTH the loop bound and the cosine T_max -- they must
+    # stay the same number, since the horizon is what is being compared.
+    epochs = int(cfg.get("epochs", args.epochs))
 
     # One wandb run per (config, fold), grouped by config so the UI averages
     # folds natively. Compute nodes have no internet: WANDB_MODE=offline is set
@@ -191,7 +225,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
             tags=[cfg["bands"], cfg["arch"], cfg["optimizer"],
                   f"head:{cfg.get('head', args.head)}", f"fold{fold}"],
             config={**cfg, "fold": fold, "img_size": args.img_size,
-                    "epochs": args.epochs, "batch_size": args.batch_size,
+                    "epochs": epochs, "batch_size": args.batch_size,
                     "weight_decay": args.weight_decay, "seed": args.seed,
                     "lr_schedule": args.lr_schedule,
                     **{f"head_{k}" if k != "head" else "head_spec": v
@@ -269,11 +303,11 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         scheduler = None
         if args.lr_schedule == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=args.epochs)
+                optimizer, T_max=epochs)
 
         best_val, best_state, best_epoch = float("inf"), None, None
         fold_start = time.time()
-        for epoch in range(args.epochs):
+        for epoch in range(epochs):
             epoch_start = time.time()
             train_loss = train_one_epoch(model, loaders["train"], optimizer,
                                          criterion, device)
@@ -285,14 +319,14 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
                 best_state = {k: v.detach().cpu().clone()
                               for k, v in model.state_dict().items()}
             secs = time.time() - epoch_start
-            print(f"  [{config_name(cfg, args.head)} fold {fold}] epoch {epoch+1}/{args.epochs} "
+            print(f"  [{config_name(cfg, args.head)} fold {fold}] epoch {epoch+1}/{epochs} "
                   f"train {train_loss:.4f} val {val_loss:.4f} "
                   f"acc {val_metrics['accuracy']:.3f} {secs:.1f}s")
             # A task that will blow its walltime is knowable from the first
             # epoch, not from the log 30 hours later. Project the whole task
             # (remaining folds included) while there is still time to requeue.
             if epoch == 0:
-                per_fold = secs * args.epochs / 3600
+                per_fold = secs * epochs / 3600
                 print(f"  [{config_name(cfg, args.head)} fold {fold}] "
                       f"projected {per_fold:.1f} h/fold, "
                       f"{per_fold * args.folds:.1f} h for all {args.folds} folds")
@@ -309,7 +343,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         if best_state is None:
             raise RuntimeError(
                 f"{config_name(cfg, args.head)} fold {fold}: no finite "
-                f"validation loss in {args.epochs} epochs — training diverged"
+                f"validation loss in {epochs} epochs — training diverged"
             )
 
         # Score the checkpoint that would actually be shipped, at an operating
@@ -330,7 +364,7 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         "head_spec": hcfg,
         "augment": not args.no_augment,
         "fold": fold,
-        "epochs": args.epochs,
+        "epochs": epochs,
         "lr_schedule": args.lr_schedule,
         "best_epoch": best_epoch,
         "best_val_loss": best_val,

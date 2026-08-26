@@ -174,6 +174,29 @@ class TestBandHeadGrid:
         assert names[12] == "rgb+swir22_gap"
         assert names[15] == "rgb+swir22_full"
 
+    def test_epochs_grid_shape_and_names(self):
+        R = self._grid()
+        assert len(R.EPOCHS_GRID) == 15
+        # heads outer, horizons inner -- the SLURM script maps array index
+        # this way with no lookup table
+        names = [R.config_name(c) for c in R.EPOCHS_GRID]
+        assert names[0] == "rgb+swir16_gap_e40"
+        assert names[4] == "rgb+swir16_gap_e200"
+        assert names[5] == "rgb+swir16_mixed_e40"
+        assert names[14] == "rgb+swir16_spatial_e200"
+        assert len(set(names)) == 15
+        assert all(c["bands"] == "rgb+swir16" for c in R.EPOCHS_GRID)
+        assert "full" not in {c["head"] for c in R.EPOCHS_GRID}
+
+    def test_epochs_suffix_does_not_touch_bandhead_names(self):
+        # the bandhead sweep has 80 finished result JSONs on disk; adding the
+        # epochs axis must not rename any of them, or --summarize silently
+        # splits one config's folds across two rows
+        R = self._grid()
+        assert R.config_name(R.BANDHEAD_GRID[0]) == "rgb_gap"
+        assert R.config_name(R.BANDHEAD_GRID[9]) == "rgb+swir16_mixed"
+        assert all("_e" not in R.config_name(c) for c in R.BANDHEAD_GRID)
+
     def test_every_config_builds_with_expected_size(self):
         R = self._grid()
         expected = {"gap": 228_609, "mixed": 229_657,
@@ -355,6 +378,41 @@ class TestRunOneSmoke:
         assert logged[0]["head_spec"] == R.HEADS[head]["head"]
         assert logged[-1] == "finish"
         assert final["test_auc"] == result["test_auc"]
+
+    def test_config_epochs_override_cli_and_set_T_max(self, tmp_path, monkeypatch):
+        # the horizon IS the schedule: cfg["epochs"] must drive the loop bound
+        # and CosineAnnealingLR's T_max together, not just the loop
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "engine"))
+        import run_cv_grid as R
+        from cloudytile.splits import add_lake_id
+
+        monkeypatch.setattr(R, "WANDB_AVAILABLE", False, raising=False)
+        seen = {}
+        real = __import__("torch").optim.lr_scheduler.CosineAnnealingLR
+
+        def spy(optimizer, T_max, **kw):
+            seen["T_max"] = T_max
+            return real(optimizer, T_max=T_max, **kw)
+
+        monkeypatch.setattr(
+            __import__("torch").optim.lr_scheduler, "CosineAnnealingLR", spy)
+
+        csv, nc_dir = make_tiles(tmp_path, n=24, size=64, nan_frac=0.1)
+        df = add_lake_id(pd.read_csv(csv))
+        lakes = np.sort(df["lake_id"].unique())
+        train_df = df[df["lake_id"].isin(lakes[:-2])].reset_index(drop=True)
+        test_df = df[df["lake_id"].isin(lakes[-2:])].reset_index(drop=True)
+
+        cfg = dict(R.EPOCHS_GRID[0])       # gap, 40 epochs
+        cfg["epochs"] = 3                  # keep the test fast
+        # args says 1; the config must win
+        result = R.run_one(cfg, 0, train_df, test_df,
+                           self._args(nc_dir, epochs=1))
+        assert result["epochs"] == 3
+        assert seen["T_max"] == 3
+        assert result["best_epoch"] <= 3
 
     def test_v1_config_without_head_takes_it_from_cli(self, tmp_path, monkeypatch):
         # GRID configs predate the head axis; run_one must fall back to flags
