@@ -168,6 +168,29 @@ def config_name(cfg: dict, head: str = "gap") -> str:
     return base if head == "gap" else f"{base}_{head}"
 
 
+# What has to match for two scores to mean the same thing. Deliberately NOT
+# including epochs: the horizon is an axis in the epochs grid, so configs there
+# differ in it on purpose. Everything here is held constant within a sweep, and
+# a directory containing more than one combination is a mixed table -- the
+# failure the "OUT_DIR MUST DIFFER" note in the SLURM scripts asks you to avoid
+# by hand, checked in code instead.
+REGIME_KEYS = ("img_size", "folds", "seed", "lr_schedule", "augment",
+               "batch_size", "weight_decay", "split_dir")
+
+
+def _regime_of(args) -> dict:
+    return {
+        "img_size": args.img_size,
+        "folds": args.folds,
+        "seed": args.seed,
+        "lr_schedule": args.lr_schedule,
+        "augment": not args.no_augment,
+        "batch_size": args.batch_size,
+        "weight_decay": args.weight_decay,
+        "split_dir": str(args.split_dir) if args.split_dir else None,
+    }
+
+
 def split_off_val_lakes(train_df: pd.DataFrame, seed: int, val_frac: float = 0.15):
     """Hold out whole lakes from a fold's training set for checkpoint selection."""
     lakes = np.sort(train_df["lake_id"].unique())
@@ -362,13 +385,25 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
         "config_name": config_name(cfg, args.head),
         "head": cfg.get("head", args.head),
         "head_spec": hcfg,
-        "augment": not args.no_augment,
+        # REGIME. Two scores are comparable only if these match, and until now
+        # a result file did not record enough to check: a k=3 256px row and a
+        # k=5 512px row were indistinguishable once the JSON left its
+        # directory. Provenance travels with the data, so summarize() can
+        # verify it rather than trusting the directory name.
+        **_regime_of(args),
         "fold": fold,
         "epochs": epochs,
-        "lr_schedule": args.lr_schedule,
         "best_epoch": best_epoch,
         "best_val_loss": best_val,
         "elapsed_sec": round(time.time() - fold_start, 1),
+        # Which offline run this fold wrote. Compute nodes have no internet, so
+        # runs buffer to disk and are synced later -- and picking them out by
+        # date glob is guesswork that once matched 636 directories, most of
+        # them long-deleted server-side, burying the wanted runs in HTTP 410s.
+        # Recording the path makes the upload exact: see engine/upload_wandb.py.
+        "wandb_run_dir": (str(Path(run.dir).parent)
+                          if run is not None and getattr(run, "dir", None)
+                          else None),
         "threshold": threshold,
         "n_parameters": model.n_parameters(),
         "test_loss": test_loss,
@@ -387,11 +422,39 @@ def run_one(cfg: dict, fold: int, train_df, test_df, args) -> dict:
 
 
 def summarize(out_dir: Path):
-    rows = [json.loads(p.read_text()) for p in sorted(out_dir.glob("*.json"))]
+    rows = [json.loads(p.read_text()) for p in sorted(out_dir.glob("*.json"))
+            if p.name != "summary.csv"]
     if not rows:
         print(f"no result JSONs in {out_dir}")
         return
     df = pd.DataFrame(rows)
+
+    # State the regime, and refuse to present a blended table as a ranking.
+    # Results written before these keys existed report "?" rather than being
+    # dropped -- they are still readable, just less self-describing.
+    present = [k for k in REGIME_KEYS if k in df.columns]
+    if present:
+        regimes = (df[present].astype(str).drop_duplicates()
+                   if present else pd.DataFrame())
+        if len(regimes) == 1:
+            r = regimes.iloc[0]
+            print("Regime: " + "  ".join(f"{k}={r[k]}" for k in present))
+        else:
+            print(f"WARNING: {len(regimes)} DIFFERENT REGIMES in {out_dir}.")
+            print("Scores below are NOT comparable across them -- these are "
+                  "means over different data or different training setups.")
+            df["_regime"] = df[present].astype(str).agg(" ".join, axis=1)
+            for i, (rk, grp) in enumerate(df.groupby("_regime")):
+                names = sorted(grp["config_name"].unique())
+                print(f"  regime {i}: {rk}")
+                print(f"    {len(grp)} runs, {len(names)} configs: "
+                      f"{', '.join(names[:4])}{' ...' if len(names) > 4 else ''}")
+            print("Split them into separate --out_dir directories and "
+                  "summarize each.\n")
+            df = df.drop(columns="_regime")
+    missing = [k for k in REGIME_KEYS if k not in df.columns]
+    if missing:
+        print(f"  (regime fields not recorded by this run: {', '.join(missing)})")
     # Ranked by AUC: it is threshold-free, so it compares configs without also
     # comparing whatever operating point each fold happened to choose. Accuracy
     # is reported alongside but sits close to the 68% majority rate.

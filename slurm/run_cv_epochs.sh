@@ -64,9 +64,14 @@
 # OUT_DIR is separate from cv_results_bandhead. Names differ anyway (the _e<N>
 # suffix), so this is belt-and-braces: one directory, one regime.
 #
-# Aggregate from a LOGIN node when it finishes:
+# Aggregate and upload from a LOGIN node when it finishes:
 #   python3 engine/run_cv_grid.py --out_dir <OUT_DIR> --summarize
-#   wandb sync /oak/.../sherlock_cloudytile/wandb/offline-run-<DATE>_*
+#   python3 engine/upload_wandb.py --out_dir <OUT_DIR> --sync --table \
+#       --project cloudy-tile-cv-epochs
+#
+# --sync reads wandb_run_dir out of each result JSON and uploads exactly those
+# offline runs, so there is no date glob to get wrong. --table posts the
+# ranking as one summary run. Add --dry-run to --sync to look first.
 # =============================================================================
 
 ml system

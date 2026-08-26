@@ -322,6 +322,7 @@ class TestRunOneSmoke:
                  wandb_project="smoke", img_size=64, epochs=1, batch_size=4,
                  weight_decay=1e-4, lr_schedule="cosine", no_augment=True,
                  nc_dir=nc_dir, band_stats=STATS, num_workers=0, folds=5,
+                 split_dir=None,
                  threshold_objective="f1", target_precision=0.9)
         a.update(over)
         return argparse.Namespace(**a)
@@ -340,13 +341,18 @@ class TestRunOneSmoke:
 
         final = {}
 
+        class FakeRun:
+            # real wandb.run.dir is <offline-run-dir>/files; run_one records
+            # the parent so the upload can target it exactly
+            dir = str(tmp_path / "wandb" / "offline-run-XYZ" / "files")
+
         class FakeWandb:
             summary = final  # run_one writes final metrics via wandb.summary
 
             @staticmethod
             def init(**kw):
                 logged.append(kw["config"])
-                return object()
+                return FakeRun()
 
             @staticmethod
             def log(d):
@@ -378,6 +384,14 @@ class TestRunOneSmoke:
         assert logged[0]["head_spec"] == R.HEADS[head]["head"]
         assert logged[-1] == "finish"
         assert final["test_auc"] == result["test_auc"]
+        # provenance: the offline run dir must be recorded, not left to a glob
+        assert result["wandb_run_dir"].endswith("offline-run-XYZ")
+        # regime: enough to tell this row from a k=3 256px one
+        for k in ("img_size", "folds", "seed", "lr_schedule", "augment",
+                  "batch_size", "weight_decay", "split_dir"):
+            assert k in result, k
+        assert result["img_size"] == 64 and result["folds"] == 5
+        assert result["augment"] is False
 
     def test_config_epochs_override_cli_and_set_T_max(self, tmp_path, monkeypatch):
         # the horizon IS the schedule: cfg["epochs"] must drive the loop bound
@@ -520,6 +534,40 @@ class TestGridCLI:
         assert r.returncode == 0, r.stderr[-1000:]
         assert "rgb_mixed" in r.stdout
         assert (tmp_path / "out" / "summary.csv").exists()
+
+    def test_summarize_refuses_to_blend_two_regimes(self, tmp_path):
+        # the exact accident the SLURM scripts warn about in prose: two sweeps
+        # into one directory produce a ranking whose rows are not comparable
+        import json
+        size = self._fixture(tmp_path)
+        base = ("--grid", "bandhead", "--folds", "2", "--epochs", "1",
+                "--num_workers", "0", "--no_augment",
+                "--lr_schedule", "cosine", "--seed", "42",
+                "--img_size", str(size))
+        # identical except batch_size, which is a regime key: same folds, same
+        # shapes, but not the same training setup
+        r = self._run(tmp_path, "--config_index", "1", "--batch_size", "8", *base)
+        assert r.returncode == 0, r.stderr[-1500:]
+        r = self._run(tmp_path, "--config_index", "2", "--batch_size", "16", *base)
+        assert r.returncode == 0, r.stderr[-1500:]
+
+        r = self._run(tmp_path, "--summarize")
+        assert r.returncode == 0
+        assert "2 DIFFERENT REGIMES" in r.stdout
+        assert "NOT comparable" in r.stdout
+        assert "separate --out_dir" in r.stdout
+
+    def test_summarize_states_the_regime_when_consistent(self, tmp_path):
+        size = self._fixture(tmp_path)
+        r = self._run(tmp_path, "--config_index", "1", "--grid", "bandhead",
+                      "--folds", "2", "--epochs", "1", "--img_size", str(size),
+                      "--batch_size", "8", "--num_workers", "0", "--no_augment",
+                      "--lr_schedule", "cosine", "--seed", "42")
+        assert r.returncode == 0, r.stderr[-1500:]
+        r = self._run(tmp_path, "--summarize")
+        assert "Regime:" in r.stdout
+        assert f"img_size={size}" in r.stdout and "folds=2" in r.stdout
+        assert "DIFFERENT REGIMES" not in r.stdout
 
     def test_config_index_past_the_grid_is_rejected(self, tmp_path):
         self._fixture(tmp_path)
